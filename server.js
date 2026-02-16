@@ -52,55 +52,32 @@ async function getAccessToken() {
    HEALTH ROUTES
 =========================== */
 
-app.get('/health', function (req, res) {
+app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
-    message: 'Backend is running',
+    message: 'Backend running',
     timestamp: new Date()
   });
 });
 
-app.get('/api/health', function (req, res) {
+app.get('/api/health', (req, res) => {
   res.json({ status: 'Backend running' });
 });
 
 /* ===========================
-   PAGINATED + FILTERED FETCH
+   PAGINATED DATAVERSE FETCH
 =========================== */
 
-app.get('/api/packing-entries', async function (req, res) {
+app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
 
-    // Pagination
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 100;
+
     const skip = (page - 1) * pageSize;
 
-    // Filtering
-    let filters = [];
-
-    if (req.query.press) {
-      filters.push(`cr581_press eq '${req.query.press}'`);
-    }
-
-    if (req.query.shift) {
-      filters.push(`cr581_shift eq '${req.query.shift}'`);
-    }
-
-    if (req.query.status) {
-      filters.push(`cr581_status eq '${req.query.status}'`);
-    }
-
-    if (req.query.holdStatus) {
-      filters.push(`cr581_holdstatus eq '${req.query.holdStatus}'`);
-    }
-
-    const filterQuery = filters.length > 0
-      ? `$filter=${filters.join(' and ')}`
-      : '';
-
-    // Only required columns (IMPORTANT for performance)
+    // ONLY VALID COLUMNS FROM YOUR RECORD
     const selectFields = [
       'cr581_masterid',
       'cr581_press',
@@ -126,7 +103,6 @@ app.get('/api/packing-entries', async function (req, res) {
       'cr581_productiondate',
       'cr581_productionshift',
       'cr581_productionsupervisor',
-      'cr581_packingsupervisor',
       'cr581_sectiongroup',
       'cr581_productionpress',
       'cr581_hardness',
@@ -134,14 +110,11 @@ app.get('/api/packing-entries', async function (req, res) {
       'createdon'
     ].join(',');
 
-    const url = `
-      ${DATAVERSE_URL}/api/data/v9.2/cr581_masters
-      ?$select=${selectFields}
-      &$count=true
-      &$top=${pageSize}
-      &$skip=${skip}
-      ${filterQuery ? '&' + filterQuery : ''}
-    `.replace(/\s+/g, '');
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr581_masters` +
+      `?$select=${selectFields}` +
+      `&$count=true` +
+      `&$top=${pageSize}` +
+      `&$skip=${skip}`;
 
     const response = await axios.get(url, {
       headers: {
@@ -159,7 +132,7 @@ app.get('/api/packing-entries', async function (req, res) {
     });
 
   } catch (error) {
-    console.error('Dataverse Error:', error.response?.data || error.message);
+    console.error(error.response?.data || error.message);
 
     res.status(500).json({
       error: 'Dataverse fetch failed',
@@ -172,6 +145,6 @@ app.get('/api/packing-entries', async function (req, res) {
    START SERVER
 =========================== */
 
-app.listen(PORT, function () {
+app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
 });
