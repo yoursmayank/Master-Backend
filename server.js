@@ -23,13 +23,14 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
-const SCOPE = `${DATAVERSE_URL}/.default`;
+const ENTITY_NAME = 'cr581_masters';
+const SCOPE = DATAVERSE_URL + '/.default';
 
 app.use(cors());
 app.use(express.json());
 
 /* ===========================
-   TOKEN
+   ACCESS TOKEN
 =========================== */
 
 async function getAccessToken() {
@@ -53,19 +54,44 @@ async function getAccessToken() {
 =========================== */
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
+  res.json({ status: 'OK', message: 'Backend running' });
 });
 
 /* ===========================
-   DATAVERSE PAGINATION (CORRECT)
+   INFINITE SCROLL API
 =========================== */
 
 app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
 
-    const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 100;
+    const pagingCookie = req.query.pagingCookie || null;
+
+    /* ======================
+       FILTERS
+    ====================== */
+
+    const filters = [];
+
+    if (req.query.press)
+      filters.push(`cr581_press eq ${req.query.press}`);
+
+    if (req.query.shift)
+      filters.push(`cr581_shift eq ${req.query.shift}`);
+
+    if (req.query.status)
+      filters.push(`cr581_status eq ${req.query.status}`);
+
+    if (req.query.holdStatus)
+      filters.push(`cr581_holdstatus eq ${req.query.holdStatus}`);
+
+    const filterQuery =
+      filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
+
+    /* ======================
+       SELECT ONLY REQUIRED FIELDS
+    ====================== */
 
     const selectFields = [
       'cr581_masterid',
@@ -75,6 +101,7 @@ app.get('/api/packing-entries', async (req, res) => {
       'cr581_orderno',
       'cr581_uniqueid',
       'cr581_sectionno',
+      'cr581_dieno',
       'cr581_sectionname',
       'cr581_sectionsize',
       'cr581_cutlength',
@@ -99,37 +126,48 @@ app.get('/api/packing-entries', async (req, res) => {
       'createdon'
     ].join(',');
 
-    let url = `${DATAVERSE_URL}/api/data/v9.2/cr581_masters` +
+    /* ======================
+       BUILD URL
+    ====================== */
+
+    let url =
+      `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}` +
       `?$select=${selectFields}` +
-      `&$top=${pageSize}`;
+      `&$top=${pageSize}` +
+      `&$count=true` +
+      filterQuery;
 
-    let currentPage = 1;
-    let records = [];
-    let nextLink = url;
+    if (pagingCookie) {
+      url += `&$skiptoken=${encodeURIComponent(pagingCookie)}`;
+    }
 
-    // Move to requested page using nextLink
-    while (nextLink && currentPage <= page) {
+    /* ======================
+       CALL DATAVERSE
+    ====================== */
 
-      const response = await axios.get(nextLink, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json'
-        }
-      });
-
-      if (currentPage === page) {
-        records = response.data.value;
-        break;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
       }
+    });
 
-      nextLink = response.data['@odata.nextLink'] || null;
-      currentPage++;
+    const nextLink = response.data['@odata.nextLink'] || null;
+
+    let nextPagingCookie = null;
+
+    if (nextLink) {
+      const parsed = new URL(nextLink);
+      nextPagingCookie = parsed.searchParams.get('$skiptoken');
     }
 
     res.json({
-      data: records,
-      page,
-      pageSize
+      data: response.data.value,
+      total: response.data['@odata.count'] || 0,
+      nextPagingCookie: nextPagingCookie
     });
 
   } catch (error) {
@@ -143,7 +181,7 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   START
+   START SERVER
 =========================== */
 
 app.listen(PORT, () => {
