@@ -45,66 +45,63 @@ async function getAccessToken() {
   return response.data.access_token;
 }
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Backend running' });
+});
+
 /* ===========================
-   INFINITE SCROLL API
+   INFINITE SCROLL & DELTA SYNC API
 =========================== */
 app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
-    const pagingCookie = req.query.pagingCookie || null;
+    let url;
 
-    /* FILTERS */
-    const filters = [];
-    if (req.query.press) filters.push(`cr581_press eq ${req.query.press}`);
-    if (req.query.shift) filters.push(`cr581_shift eq ${req.query.shift}`);
-    if (req.query.status) filters.push(`cr581_status eq ${req.query.status}`);
-    if (req.query.holdStatus) filters.push(`cr581_holdstatus eq ${req.query.holdStatus}`);
+    if (req.query.nextLink) {
+      url = req.query.nextLink;
+    } else {
+      const pageSize = parseInt(req.query.pageSize) || 5000;
+      const filters = [];
 
-    const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
+      if (req.query.press) filters.push(`cr581_press eq ${req.query.press}`);
+      if (req.query.shift) filters.push(`cr581_shift eq ${req.query.shift}`);
+      if (req.query.status) filters.push(`cr581_status eq ${req.query.status}`);
+      if (req.query.holdStatus) filters.push(`cr581_holdstatus eq ${req.query.holdStatus}`);
+      
+      // FIX 2: Support Delta Fetching (Only get brand new records)
+      if (req.query.newerThan) filters.push(`createdon gt ${req.query.newerThan}`);
 
-    /* SELECT FIELDS */
-    const selectFields = [
-      'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
-      'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
-      'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
-      'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
-      'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
-      'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
-      'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
-      'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
-    ].join(',');
+      const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
 
-    /* BUILD URL (REMOVED $top BUG) */
-    let url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$count=true${filterQuery}`;
+      const selectFields = [
+        'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
+        'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
+        'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
+        'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
+        'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
+        'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
+        'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
+        'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
+      ].join(',');
 
-    if (pagingCookie) {
-      url += `&$skiptoken=${encodeURIComponent(pagingCookie)}`;
+      // FIX 1: Added &$orderby=createdon desc so the newest 5000 load immediately
+      url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$orderby=createdon desc&$count=true${filterQuery}`;
     }
 
-    /* CALL DATAVERSE */
     const response = await axios.get(url, {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'OData-MaxVersion': '4.0',
         'OData-Version': '4.0',
-        // This is the correct way to set page size without killing pagination
         Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
       }
     });
 
-    const nextLink = response.data['@odata.nextLink'] || null;
-    let nextPagingCookie = null;
-
-    if (nextLink) {
-      const parsed = new URL(nextLink);
-      nextPagingCookie = parsed.searchParams.get('$skiptoken');
-    }
-
     res.json({
       data: response.data.value,
       total: response.data['@odata.count'] || 0,
-      nextPagingCookie: nextPagingCookie
+      nextLink: response.data['@odata.nextLink'] || null 
     });
 
   } catch (error) {
