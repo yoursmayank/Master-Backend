@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression'); // <-- ADDED COMPRESSION
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
@@ -25,6 +26,8 @@ const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
 const ENTITY_NAME = 'cr581_masters';
 const SCOPE = DATAVERSE_URL + '/.default';
 
+// --- APPLY COMPRESSION & MIDDLEWARE ---
+app.use(compression()); // Compress all API responses to speed up massive data transfers
 app.use(cors());
 app.use(express.json());
 
@@ -68,7 +71,7 @@ app.get('/api/packing-entries', async (req, res) => {
       if (req.query.status) filters.push(`cr581_status eq ${req.query.status}`);
       if (req.query.holdStatus) filters.push(`cr581_holdstatus eq ${req.query.holdStatus}`);
       
-      // FIX 2: Support Delta Fetching (Only get brand new records)
+      // Support Delta Fetching (Only get brand new records)
       if (req.query.newerThan) filters.push(`createdon gt ${req.query.newerThan}`);
 
       const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
@@ -84,7 +87,7 @@ app.get('/api/packing-entries', async (req, res) => {
         'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
       ].join(',');
 
-      // FIX 1: Added &$orderby=createdon desc so the newest 5000 load immediately
+      // Added &$orderby=createdon desc so the newest 5000 load immediately
       url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$orderby=createdon desc&$count=true${filterQuery}`;
     }
 
