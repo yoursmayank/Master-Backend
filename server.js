@@ -58,15 +58,15 @@ app.get('/health', (req, res) => {
 });
 
 /* ===========================
-   INFINITE SCROLL API
+   FETCH ALL ROWS API
 =========================== */
 
 app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
 
-    const pageSize = parseInt(req.query.pageSize) || 100;
-    const pagingCookie = req.query.pagingCookie || null;
+    // Dataverse maxes out at 5000 per chunk. We force it to 5000 to speed up the loop.
+    const pageSize = 5000;
 
     /* ======================
        FILTERS
@@ -127,7 +127,7 @@ app.get('/api/packing-entries', async (req, res) => {
     ].join(',');
 
     /* ======================
-       BUILD URL
+       BUILD INITIAL URL
     ====================== */
 
     let url =
@@ -137,37 +137,42 @@ app.get('/api/packing-entries', async (req, res) => {
       `&$count=true` +
       filterQuery;
 
-    if (pagingCookie) {
-      url += `&$skiptoken=${encodeURIComponent(pagingCookie)}`;
-    }
-
     /* ======================
-       CALL DATAVERSE
+       CALL DATAVERSE (LOOP UNTIL ALL DATA IS FETCHED)
     ====================== */
 
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-        'OData-MaxVersion': '4.0',
-        'OData-Version': '4.0',
-        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+    let allRecords = [];
+    let totalCount = 0;
+
+    // This loop continues fetching the next 5000 rows as long as Dataverse provides a nextLink
+    while (url) {
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+        }
+      });
+
+      // Add the new chunk of records to our master array
+      const batch = response.data.value || [];
+      allRecords = allRecords.concat(batch);
+
+      // Save the total count reported by Dataverse on the first page
+      if (!totalCount && response.data['@odata.count']) {
+        totalCount = response.data['@odata.count'];
       }
-    });
 
-    const nextLink = response.data['@odata.nextLink'] || null;
-
-    let nextPagingCookie = null;
-
-    if (nextLink) {
-      const parsed = new URL(nextLink);
-      nextPagingCookie = parsed.searchParams.get('$skiptoken');
+      // Grab the exact URL for the next chunk (null if we have reached the end)
+      url = response.data['@odata.nextLink'] || null;
     }
 
+    // Send the complete, combined dataset back to the React portal
     res.json({
-      data: response.data.value,
-      total: response.data['@odata.count'] || 0,
-      nextPagingCookie: nextPagingCookie
+      data: allRecords,
+      total: totalCount || allRecords.length
     });
 
   } catch (error) {
