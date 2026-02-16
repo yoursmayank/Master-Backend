@@ -29,7 +29,7 @@ app.use(cors());
 app.use(express.json());
 
 /* ===========================
-   GET ACCESS TOKEN
+   TOKEN
 =========================== */
 
 async function getAccessToken() {
@@ -49,23 +49,15 @@ async function getAccessToken() {
 }
 
 /* ===========================
-   HEALTH ROUTES
+   HEALTH
 =========================== */
 
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    message: 'Backend running',
-    timestamp: new Date()
-  });
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'Backend running' });
+  res.status(200).json({ status: 'OK' });
 });
 
 /* ===========================
-   PAGINATED DATAVERSE FETCH
+   DATAVERSE PAGINATION (CORRECT)
 =========================== */
 
 app.get('/api/packing-entries', async (req, res) => {
@@ -75,9 +67,6 @@ app.get('/api/packing-entries', async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 100;
 
-    const skip = (page - 1) * pageSize;
-
-    // ONLY VALID COLUMNS FROM YOUR RECORD
     const selectFields = [
       'cr581_masterid',
       'cr581_press',
@@ -110,23 +99,35 @@ app.get('/api/packing-entries', async (req, res) => {
       'createdon'
     ].join(',');
 
-    const url = `${DATAVERSE_URL}/api/data/v9.2/cr581_masters` +
+    let url = `${DATAVERSE_URL}/api/data/v9.2/cr581_masters` +
       `?$select=${selectFields}` +
-      `&$count=true` +
-      `&$top=${pageSize}` +
-      `&$skip=${skip}`;
+      `&$top=${pageSize}`;
 
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-        'Prefer': 'odata.include-annotations="*"'
+    let currentPage = 1;
+    let records = [];
+    let nextLink = url;
+
+    // Move to requested page using nextLink
+    while (nextLink && currentPage <= page) {
+
+      const response = await axios.get(nextLink, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json'
+        }
+      });
+
+      if (currentPage === page) {
+        records = response.data.value;
+        break;
       }
-    });
+
+      nextLink = response.data['@odata.nextLink'] || null;
+      currentPage++;
+    }
 
     res.json({
-      data: response.data.value,
-      total: response.data['@odata.count'],
+      data: records,
       page,
       pageSize
     });
@@ -142,7 +143,7 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   START SERVER
+   START
 =========================== */
 
 app.listen(PORT, () => {
