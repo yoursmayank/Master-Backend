@@ -1,5 +1,5 @@
 const express = require('express');
-const compression = require('compression'); // <-- ADDED COMPRESSION
+const compression = require('compression');
 const axios = require('axios');
 const cors = require('cors');
 require('dotenv').config();
@@ -26,8 +26,7 @@ const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
 const ENTITY_NAME = 'cr581_masters';
 const SCOPE = DATAVERSE_URL + '/.default';
 
-// --- APPLY COMPRESSION & MIDDLEWARE ---
-app.use(compression()); // Compress all API responses to speed up massive data transfers
+app.use(compression()); 
 app.use(cors());
 app.use(express.json());
 
@@ -58,37 +57,34 @@ app.get('/health', (req, res) => {
 app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
-    let url;
+    
+    const pagingCookie = req.query.pagingCookie || null;
+    const newerThan = req.query.newerThan || null;
 
-    if (req.query.nextLink) {
-      url = req.query.nextLink;
-    } else {
-      const pageSize = parseInt(req.query.pageSize) || 5000;
-      const filters = [];
+    const filters = [];
+    
+    // Support Delta Fetching (Only get brand new records)
+    if (newerThan) filters.push(`createdon gt ${newerThan}`);
 
-      if (req.query.press) filters.push(`cr581_press eq ${req.query.press}`);
-      if (req.query.shift) filters.push(`cr581_shift eq ${req.query.shift}`);
-      if (req.query.status) filters.push(`cr581_status eq ${req.query.status}`);
-      if (req.query.holdStatus) filters.push(`cr581_holdstatus eq ${req.query.holdStatus}`);
-      
-      // Support Delta Fetching (Only get brand new records)
-      if (req.query.newerThan) filters.push(`createdon gt ${req.query.newerThan}`);
+    const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
 
-      const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
+    const selectFields = [
+      'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
+      'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
+      'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
+      'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
+      'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
+      'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
+      'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
+      'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
+    ].join(',');
 
-      const selectFields = [
-        'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
-        'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
-        'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
-        'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
-        'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
-        'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
-        'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
-        'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
-      ].join(',');
+    // Base URL grabs newest first (DESC)
+    let url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$orderby=createdon desc&$count=true${filterQuery}`;
 
-      // Added &$orderby=createdon desc so the newest 5000 load immediately
-      url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$orderby=createdon desc&$count=true${filterQuery}`;
+    // Safely inject Dataverse pagination token
+    if (pagingCookie) {
+      url += `&$skiptoken=${encodeURIComponent(pagingCookie)}`;
     }
 
     const response = await axios.get(url, {
@@ -101,10 +97,19 @@ app.get('/api/packing-entries', async (req, res) => {
       }
     });
 
+    const nextLink = response.data['@odata.nextLink'] || null;
+    let nextPagingCookie = null;
+
+    if (nextLink) {
+      const parsed = new URL(nextLink);
+      nextPagingCookie = parsed.searchParams.get('$skiptoken');
+    }
+
+    // FIX: Passing the nextPagingCookie so frontend can find it!
     res.json({
       data: response.data.value,
       total: response.data['@odata.count'] || 0,
-      nextLink: response.data['@odata.nextLink'] || null 
+      nextPagingCookie: nextPagingCookie 
     });
 
   } catch (error) {
