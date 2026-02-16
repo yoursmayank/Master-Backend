@@ -23,7 +23,7 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
-const SCOPE = DATAVERSE_URL + '/.default';
+const SCOPE = `${DATAVERSE_URL}/.default`;
 
 app.use(cors());
 app.use(express.json());
@@ -65,35 +65,101 @@ app.get('/api/health', function (req, res) {
 });
 
 /* ===========================
-   DATAVERSE PAGINATED FETCH
+   PAGINATED + FILTERED FETCH
 =========================== */
 
 app.get('/api/packing-entries', async function (req, res) {
   try {
     const token = await getAccessToken();
 
-    let allRecords = [];
-    let nextUrl = `${DATAVERSE_URL}/api/data/v9.2/cr581_masters?$top=5000`;
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 100;
+    const skip = (page - 1) * pageSize;
 
-    while (nextUrl) {
-      const response = await axios.get(nextUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json'
-        }
-      });
+    // Filtering
+    let filters = [];
 
-      allRecords = allRecords.concat(response.data.value);
-
-      nextUrl = response.data['@odata.nextLink'] || null;
+    if (req.query.press) {
+      filters.push(`cr581_press eq '${req.query.press}'`);
     }
 
-    console.log(`Total rows fetched: ${allRecords.length}`);
+    if (req.query.shift) {
+      filters.push(`cr581_shift eq '${req.query.shift}'`);
+    }
 
-    res.json(allRecords);
+    if (req.query.status) {
+      filters.push(`cr581_status eq '${req.query.status}'`);
+    }
+
+    if (req.query.holdStatus) {
+      filters.push(`cr581_holdstatus eq '${req.query.holdStatus}'`);
+    }
+
+    const filterQuery = filters.length > 0
+      ? `$filter=${filters.join(' and ')}`
+      : '';
+
+    // Only required columns (IMPORTANT for performance)
+    const selectFields = [
+      'cr581_masterid',
+      'cr581_press',
+      'cr581_packingdate',
+      'cr581_shift',
+      'cr581_orderno',
+      'cr581_uniqueid',
+      'cr581_sectionno',
+      'cr581_sectionname',
+      'cr581_sectionsize',
+      'cr581_cutlength',
+      'cr581_units',
+      'cr581_bundleno',
+      'cr581_pcs',
+      'cr581_bundleweight',
+      'cr581_range',
+      'cr581_holdstatus',
+      'cr581_holdto',
+      'cr581_status',
+      'cr581_dispatchedto',
+      'cr581_dispatchdate',
+      'cr581_preparedfor',
+      'cr581_productiondate',
+      'cr581_productionshift',
+      'cr581_productionsupervisor',
+      'cr581_packingsupervisor',
+      'cr581_sectiongroup',
+      'cr581_productionpress',
+      'cr581_hardness',
+      'cr581_category',
+      'createdon'
+    ].join(',');
+
+    const url = `
+      ${DATAVERSE_URL}/api/data/v9.2/cr581_masters
+      ?$select=${selectFields}
+      &$count=true
+      &$top=${pageSize}
+      &$skip=${skip}
+      ${filterQuery ? '&' + filterQuery : ''}
+    `.replace(/\s+/g, '');
+
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'Prefer': 'odata.include-annotations="*"'
+      }
+    });
+
+    res.json({
+      data: response.data.value,
+      total: response.data['@odata.count'],
+      page,
+      pageSize
+    });
 
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error('Dataverse Error:', error.response?.data || error.message);
 
     res.status(500).json({
       error: 'Dataverse fetch failed',
