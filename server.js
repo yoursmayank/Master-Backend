@@ -26,7 +26,7 @@ app.use(cors());
 app.use(express.json());
 
 async function getAccessToken() {
-  const tokenUrl = 'https://login.microsoftonline.com/' + TENANT_ID + '/oauth2/v2.0/token';
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
 
   const params = new URLSearchParams();
   params.append('grant_type', 'client_credentials');
@@ -41,9 +41,27 @@ async function getAccessToken() {
   return response.data.access_token;
 }
 
+/* ===========================
+   HEALTH ROUTES
+=========================== */
+
+// Render health check
+app.get('/health', function (req, res) {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Backend is running',
+    timestamp: new Date()
+  });
+});
+
+// Optional API health
 app.get('/api/health', function (req, res) {
   res.json({ status: 'Backend running' });
 });
+
+/* ===========================
+   DATAVERSE ROUTE
+=========================== */
 
 app.get('/api/packing-entries', async function (req, res) {
   try {
@@ -62,12 +80,18 @@ app.get('/api/packing-entries', async function (req, res) {
     res.json(response.data.value);
   } catch (error) {
     console.error(error.response?.data || error.message);
+
     res.status(500).json({
-      error: 'Dataverse fetch failed'
+      error: 'Dataverse fetch failed',
+      details: error.response?.data || error.message
     });
   }
 });
 
+/* ===========================
+   START SERVER
+=========================== */
+
 app.listen(PORT, function () {
-  console.log('Backend running at http://localhost:' + PORT);
+  console.log(`Backend running on port ${PORT}`);
 });
