@@ -4,9 +4,12 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 
-// Validate required environment variables
+/* ===========================
+   ENV VALIDATION
+=========================== */
+
 const requiredEnv = ['TENANT_ID', 'CLIENT_ID', 'CLIENT_SECRET'];
 const missingEnv = requiredEnv.filter(key => !process.env[key]);
 
@@ -24,6 +27,10 @@ const SCOPE = DATAVERSE_URL + '/.default';
 
 app.use(cors());
 app.use(express.json());
+
+/* ===========================
+   GET ACCESS TOKEN
+=========================== */
 
 async function getAccessToken() {
   const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
@@ -45,7 +52,6 @@ async function getAccessToken() {
    HEALTH ROUTES
 =========================== */
 
-// Render health check
 app.get('/health', function (req, res) {
   res.status(200).json({
     status: 'OK',
@@ -54,30 +60,38 @@ app.get('/health', function (req, res) {
   });
 });
 
-// Optional API health
 app.get('/api/health', function (req, res) {
   res.json({ status: 'Backend running' });
 });
 
 /* ===========================
-   DATAVERSE ROUTE
+   DATAVERSE PAGINATED FETCH
 =========================== */
 
 app.get('/api/packing-entries', async function (req, res) {
   try {
     const token = await getAccessToken();
 
-    const response = await axios.get(
-      DATAVERSE_URL + '/api/data/v9.2/cr581_masters',
-      {
+    let allRecords = [];
+    let nextUrl = `${DATAVERSE_URL}/api/data/v9.2/cr581_masters?$top=5000`;
+
+    while (nextUrl) {
+      const response = await axios.get(nextUrl, {
         headers: {
-          Authorization: 'Bearer ' + token,
+          Authorization: `Bearer ${token}`,
           Accept: 'application/json'
         }
-      }
-    );
+      });
 
-    res.json(response.data.value);
+      allRecords = allRecords.concat(response.data.value);
+
+      nextUrl = response.data['@odata.nextLink'] || null;
+    }
+
+    console.log(`Total rows fetched: ${allRecords.length}`);
+
+    res.json(allRecords);
+
   } catch (error) {
     console.error(error.response?.data || error.message);
 
