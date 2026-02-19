@@ -58,33 +58,37 @@ app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
     
-    const pagingCookie = req.query.pagingCookie || null;
+    // 1. Look for the pagination link sent by the React frontend
+    const nextLinkParam = req.query.nextLink || null;
     const newerThan = req.query.newerThan || null;
 
-    const filters = [];
-    
-    // Support Delta Fetching (Only get brand new records)
-    if (newerThan) filters.push(`createdon gt ${newerThan}`);
+    let url;
 
-    const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
+    if (nextLinkParam) {
+      // 2. If the frontend gave us a nextLink, use it EXACTLY as Dataverse provided it
+      url = nextLinkParam;
+    } else {
+      // 3. Otherwise, build the base query for the very first 5,000 records
+      const filters = [];
+      
+      // Support Delta Fetching (Only get brand new records)
+      if (newerThan) filters.push(`createdon gt ${newerThan}`);
 
-    const selectFields = [
-      'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
-      'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
-      'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
-      'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
-      'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
-      'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
-      'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
-      'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
-    ].join(',');
+      const filterQuery = filters.length > 0 ? `&$filter=${filters.join(' and ')}` : '';
 
-    // Base URL grabs newest first (DESC)
-    let url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$orderby=createdon desc&$count=true${filterQuery}`;
+      const selectFields = [
+        'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
+        'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
+        'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
+        'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
+        'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
+        'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
+        'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
+        'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
+      ].join(',');
 
-    // Safely inject Dataverse pagination token
-    if (pagingCookie) {
-      url += `&$skiptoken=${encodeURIComponent(pagingCookie)}`;
+      // Base URL grabs newest first (DESC)
+      url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$select=${selectFields}&$orderby=createdon desc&$count=true${filterQuery}`;
     }
 
     const response = await axios.get(url, {
@@ -97,23 +101,15 @@ app.get('/api/packing-entries', async (req, res) => {
       }
     });
 
-    const nextLink = response.data['@odata.nextLink'] || null;
-    let nextPagingCookie = null;
-
-    if (nextLink) {
-      const parsed = new URL(nextLink);
-      nextPagingCookie = parsed.searchParams.get('$skiptoken');
-    }
-
-    // FIX: Passing the nextPagingCookie so frontend can find it!
+    // 4. Pass the data AND the raw Dataverse nextLink back to the React frontend
     res.json({
       data: response.data.value,
       total: response.data['@odata.count'] || 0,
-      nextPagingCookie: nextPagingCookie 
+      nextLink: response.data['@odata.nextLink'] || null 
     });
 
   } catch (error) {
-    console.error(error.response?.data || error.message);
+    console.error("Dataverse API Error:", error.response?.data || error.message);
     res.status(500).json({ error: 'Dataverse fetch failed' });
   }
 });
