@@ -58,8 +58,11 @@ app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
     
-    const skiptoken = req.query.skiptoken || null;
-    const newerThan = req.query.newerThan || null;
+    // Frontend sends ?nextLink=<skiptoken> on page 2+, or ?pagingCookie=<token>
+    // and ?newerThan=<date> for delta sync
+    const skiptokenFromQuery = req.query.nextLink || req.query.skiptoken || null;
+    const pagingCookie        = req.query.pagingCookie || null;
+    const newerThan           = req.query.newerThan || null;
 
     // Define the base parameters
     const queryParams = {
@@ -77,12 +80,14 @@ app.get('/api/packing-entries', async (req, res) => {
         $count: 'true'
     };
 
-    // Apply delta filters or pagination tokens dynamically
+    // Apply delta filter, or pagination token from whichever source
     if (newerThan) {
         queryParams.$filter = `createdon gt ${newerThan}`;
     }
-    if (skiptoken) {
-        queryParams.$skiptoken = skiptoken;
+    if (skiptokenFromQuery) {
+        queryParams.$skiptoken = skiptokenFromQuery;
+    } else if (pagingCookie) {
+        queryParams.$skiptoken = pagingCookie;
     }
 
     const url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}`;
@@ -95,15 +100,15 @@ app.get('/api/packing-entries', async (req, res) => {
         'OData-Version': '4.0',
         Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
       },
-      params: queryParams // Axios cleanly handles encoding the huge tokens here
+      params: queryParams
     });
 
-    // Extract ONLY the token string, not the full URL
-    let extractedToken = null;
+    // Extract the raw $skiptoken string from the nextLink URL Dataverse returns
+    let nextPageToken = null;
     if (response.data['@odata.nextLink']) {
         try {
             const parsedUrl = new URL(response.data['@odata.nextLink']);
-            extractedToken = parsedUrl.searchParams.get('$skiptoken');
+            nextPageToken = parsedUrl.searchParams.get('$skiptoken');
         } catch (e) {
             console.warn("Failed to parse nextLink");
         }
@@ -112,7 +117,8 @@ app.get('/api/packing-entries', async (req, res) => {
     res.json({
       data: response.data.value,
       total: response.data['@odata.count'] || 0,
-      skiptoken: extractedToken // Handing just the raw token to React
+      // Return as 'nextLink' — this is what the frontend pagination loop reads
+      nextLink: nextPageToken || null,
     });
 
   } catch (error) {
