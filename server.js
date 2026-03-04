@@ -25,8 +25,8 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
 const ENTITY_NAME = 'cr581_masters';
 
-// FIXED logical name
-const ORDERS_ENTITY_NAME = 'cr581_generatedorders';
+// Correct logical name
+const ORDERS_ENTITY_NAME = 'cr581_generatedorderses';
 
 const SCOPE = DATAVERSE_URL + '/.default';
 
@@ -126,7 +126,7 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   GENERATED ORDERS API (NEW)
+   GENERATED ORDERS API
 =========================== */
 app.get('/api/generated-orders', async (req, res) => {
   try {
