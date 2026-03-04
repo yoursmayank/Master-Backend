@@ -24,6 +24,8 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
 const ENTITY_NAME = 'cr581_masters';
+// Added new entity for Generated Orders
+const ORDERS_ENTITY_NAME = 'cr581_generatedorderses'; 
 const SCOPE = DATAVERSE_URL + '/.default';
 
 app.use(compression()); 
@@ -52,19 +54,16 @@ app.get('/health', (req, res) => {
 });
 
 /* ===========================
-   INFINITE SCROLL API
+   PACKING ENTRIES API (cr581_masters)
 =========================== */
 app.get('/api/packing-entries', async (req, res) => {
   try {
     const token = await getAccessToken();
     
-    // Frontend sends ?nextLink=<skiptoken> on page 2+, or ?pagingCookie=<token>
-    // and ?newerThan=<date> for delta sync
     const skiptokenFromQuery = req.query.nextLink || req.query.skiptoken || null;
     const pagingCookie        = req.query.pagingCookie || null;
     const newerThan           = req.query.newerThan || null;
 
-    // Define the base parameters
     const queryParams = {
         $select: [
           'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
@@ -80,7 +79,6 @@ app.get('/api/packing-entries', async (req, res) => {
         $count: 'true'
     };
 
-    // Apply delta filter, or pagination token from whichever source
     if (newerThan) {
         queryParams.$filter = `createdon gt ${newerThan}`;
     }
@@ -103,7 +101,6 @@ app.get('/api/packing-entries', async (req, res) => {
       params: queryParams
     });
 
-    // Extract the raw $skiptoken string from the nextLink URL Dataverse returns
     let nextPageToken = null;
     if (response.data['@odata.nextLink']) {
         try {
@@ -117,13 +114,68 @@ app.get('/api/packing-entries', async (req, res) => {
     res.json({
       data: response.data.value,
       total: response.data['@odata.count'] || 0,
-      // Return as 'nextLink' — this is what the frontend pagination loop reads
       nextLink: nextPageToken || null,
     });
 
   } catch (error) {
     console.error("Dataverse API Error:", error.response ? JSON.stringify(error.response.data) : error.message);
     res.status(500).json({ error: 'Dataverse fetch failed', details: error.message });
+  }
+});
+
+/* ===========================
+   GENERATED ORDERS API (NEW)
+=========================== */
+app.get('/api/generated-orders', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    
+    // Setup pagination similar to the packing entries endpoint
+    const skiptokenFromQuery = req.query.nextLink || req.query.skiptoken || null;
+    
+    const queryParams = {
+        $count: 'true'
+    };
+
+    if (skiptokenFromQuery) {
+        queryParams.$skiptoken = skiptokenFromQuery;
+    }
+
+    // You can also add $select or $filter here later if needed
+    // queryParams.$select = 'column1,column2';
+
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${ORDERS_ENTITY_NAME}`;
+
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      },
+      params: queryParams
+    });
+
+    let nextPageToken = null;
+    if (response.data['@odata.nextLink']) {
+        try {
+            const parsedUrl = new URL(response.data['@odata.nextLink']);
+            nextPageToken = parsedUrl.searchParams.get('$skiptoken');
+        } catch (e) {
+            console.warn("Failed to parse nextLink");
+        }
+    }
+
+    res.json({
+      data: response.data.value,
+      total: response.data['@odata.count'] || 0,
+      nextLink: nextPageToken || null,
+    });
+
+  } catch (error) {
+    console.error("Generated Orders API Error:", error.response ? JSON.stringify(error.response.data) : error.message);
+    res.status(500).json({ error: 'Dataverse fetch failed for generated orders', details: error.message });
   }
 });
 
