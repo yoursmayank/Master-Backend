@@ -24,8 +24,10 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
 const ENTITY_NAME = 'cr581_masters';
-// Added new entity for Generated Orders
-const ORDERS_ENTITY_NAME = 'cr581_generatedorderses'; 
+
+// FIXED logical name
+const ORDERS_ENTITY_NAME = 'cr581_generatedorders';
+
 const SCOPE = DATAVERSE_URL + '/.default';
 
 app.use(compression()); 
@@ -130,7 +132,6 @@ app.get('/api/generated-orders', async (req, res) => {
   try {
     const token = await getAccessToken();
     
-    // Setup pagination similar to the packing entries endpoint
     const skiptokenFromQuery = req.query.nextLink || req.query.skiptoken || null;
     
     const queryParams = {
@@ -140,9 +141,6 @@ app.get('/api/generated-orders', async (req, res) => {
     if (skiptokenFromQuery) {
         queryParams.$skiptoken = skiptokenFromQuery;
     }
-
-    // You can also add $select or $filter here later if needed
-    // queryParams.$select = 'column1,column2';
 
     const url = `${DATAVERSE_URL}/api/data/v9.2/${ORDERS_ENTITY_NAME}`;
 
@@ -213,7 +211,6 @@ app.patch('/api/packing-entries/:id', async (req, res) => {
 
 /* ===========================
    BATCH HOLD UPDATE
-   Body: { ids: string[], holdStatus: number, holdTo: string }
 =========================== */
 app.post('/api/packing-entries/batch-hold', async (req, res) => {
   try {
@@ -269,7 +266,6 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 
 /* ===========================
    BATCH DELETE
-   Body: { ids: string[] }
 =========================== */
 app.post('/api/packing-entries/batch-delete', async (req, res) => {
   try {
