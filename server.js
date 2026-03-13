@@ -126,7 +126,7 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   GENERATED ORDERS API – fetches ALL pages from Dataverse (newest first)
+   GENERATED ORDERS API – newest first, supports ?page=1 (fast) or ?page=all
 =========================== */
 app.get('/api/generated-orders', async (req, res) => {
   try {
@@ -140,32 +140,41 @@ app.get('/api/generated-orders', async (req, res) => {
       Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
     };
 
-    const allRecords = [];
-    let nextUrl = null;
-    let totalCount = 0;
-    let page = 0;
+    const pageMode = (req.query.page || 'all').toString().toLowerCase();
 
-    // First request with query params
+    // First Dataverse request – always newest first
     const firstParams = {
       $orderby: 'cr581_productiondate desc',
       $count: 'true'
     };
 
     const firstResponse = await axios.get(url, { headers, params: firstParams });
-    allRecords.push(...(firstResponse.data.value || []));
-    totalCount = firstResponse.data['@odata.count'] || allRecords.length;
-    nextUrl = firstResponse.data['@odata.nextLink'] || null;
-    page++;
-    console.log(`[generated-orders] Page ${page}: ${firstResponse.data.value?.length || 0} records fetched`);
+    const firstPage = firstResponse.data.value || [];
+    const totalCount = firstResponse.data['@odata.count'] || firstPage.length;
+    let nextUrl = firstResponse.data['@odata.nextLink'] || null;
 
-    // Follow all subsequent pages using @odata.nextLink
+    console.log(`[generated-orders] Page 1: ${firstPage.length} records (total in Dataverse: ${totalCount})`);
+
+    // If only first page requested, return immediately
+    if (pageMode === '1' || pageMode === 'first') {
+      return res.json({
+        data: firstPage,
+        total: totalCount,
+        hasMore: !!nextUrl,
+        nextLink: null,
+      });
+    }
+
+    // Otherwise fetch ALL remaining pages
+    const allRecords = [...firstPage];
+    let page = 1;
     while (nextUrl) {
       page++;
       const nextResponse = await axios.get(nextUrl, { headers });
       const pageRecords = nextResponse.data.value || [];
       allRecords.push(...pageRecords);
       nextUrl = nextResponse.data['@odata.nextLink'] || null;
-      console.log(`[generated-orders] Page ${page}: ${pageRecords.length} records fetched (total so far: ${allRecords.length})`);
+      console.log(`[generated-orders] Page ${page}: ${pageRecords.length} records (total so far: ${allRecords.length})`);
     }
 
     console.log(`[generated-orders] Done – ${allRecords.length} total records across ${page} page(s)`);
@@ -173,6 +182,7 @@ app.get('/api/generated-orders', async (req, res) => {
     res.json({
       data: allRecords,
       total: totalCount,
+      hasMore: false,
       nextLink: null,
     });
 
