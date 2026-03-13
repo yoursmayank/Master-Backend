@@ -126,49 +126,54 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   GENERATED ORDERS API
+   GENERATED ORDERS API – fetches ALL pages from Dataverse (newest first)
 =========================== */
 app.get('/api/generated-orders', async (req, res) => {
   try {
     const token = await getAccessToken();
-    
-    const skiptokenFromQuery = req.query.nextLink || req.query.skiptoken || null;
-    
-    const queryParams = {
-        $count: 'true'
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${ORDERS_ENTITY_NAME}`;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+      Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
     };
 
-    if (skiptokenFromQuery) {
-        queryParams.$skiptoken = skiptokenFromQuery;
+    const allRecords = [];
+    let nextUrl = null;
+    let totalCount = 0;
+    let page = 0;
+
+    // First request with query params
+    const firstParams = {
+      $orderby: 'cr581_productiondate desc',
+      $count: 'true'
+    };
+
+    const firstResponse = await axios.get(url, { headers, params: firstParams });
+    allRecords.push(...(firstResponse.data.value || []));
+    totalCount = firstResponse.data['@odata.count'] || allRecords.length;
+    nextUrl = firstResponse.data['@odata.nextLink'] || null;
+    page++;
+    console.log(`[generated-orders] Page ${page}: ${firstResponse.data.value?.length || 0} records fetched`);
+
+    // Follow all subsequent pages using @odata.nextLink
+    while (nextUrl) {
+      page++;
+      const nextResponse = await axios.get(nextUrl, { headers });
+      const pageRecords = nextResponse.data.value || [];
+      allRecords.push(...pageRecords);
+      nextUrl = nextResponse.data['@odata.nextLink'] || null;
+      console.log(`[generated-orders] Page ${page}: ${pageRecords.length} records fetched (total so far: ${allRecords.length})`);
     }
 
-    const url = `${DATAVERSE_URL}/api/data/v9.2/${ORDERS_ENTITY_NAME}`;
-
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-        'OData-MaxVersion': '4.0',
-        'OData-Version': '4.0',
-        Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
-      },
-      params: queryParams
-    });
-
-    let nextPageToken = null;
-    if (response.data['@odata.nextLink']) {
-        try {
-            const parsedUrl = new URL(response.data['@odata.nextLink']);
-            nextPageToken = parsedUrl.searchParams.get('$skiptoken');
-        } catch (e) {
-            console.warn("Failed to parse nextLink");
-        }
-    }
+    console.log(`[generated-orders] Done – ${allRecords.length} total records across ${page} page(s)`);
 
     res.json({
-      data: response.data.value,
-      total: response.data['@odata.count'] || 0,
-      nextLink: nextPageToken || null,
+      data: allRecords,
+      total: totalCount,
+      nextLink: null,
     });
 
   } catch (error) {
