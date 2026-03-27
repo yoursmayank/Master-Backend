@@ -27,9 +27,6 @@ const DATAVERSE_URL = process.env.ORG_URL;
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
-// Orders table
-const ORDERS_ENTITY_NAME = 'cr581_generatedorderses';
-
 const SCOPE = DATAVERSE_URL + '/.default';
 
 app.use(compression());
@@ -92,6 +89,7 @@ app.get('/api/packing-entries', async (req, res) => {
         'statecode',
         'statuscode'
       ].join(','),
+      // Expand the production order relationship to pull section/order fields
       $expand: 'cr7e4_ordernumber',
       $orderby: 'createdon desc',
       $count: 'true'
@@ -142,63 +140,58 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   GENERATED ORDERS API
+   DEBUG: INSPECT PRODUCTION ORDER FIELDS
+   Call after deploy: GET /api/debug-order
+   Shows all fields on a sample production order + its section master
 =========================== */
-app.get('/api/generated-orders', async (req, res) => {
+app.get('/api/debug-order', async (req, res) => {
   try {
     const token = await getAccessToken();
-    const url = `${DATAVERSE_URL}/api/data/v9.2/${ORDERS_ENTITY_NAME}`;
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json',
-      'OData-MaxVersion': '4.0',
-      'OData-Version': '4.0',
-      Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
-    };
-
-    const pageMode = (req.query.page || 'all').toString().toLowerCase();
-
-    const firstParams = {
-      $orderby: 'cr581_productiondate desc',
-      $count: 'true'
-    };
-
-    const firstResponse = await axios.get(url, { headers, params: firstParams });
-    const firstPage = firstResponse.data.value || [];
-    const totalCount = firstResponse.data['@odata.count'] || firstPage.length;
-    let nextUrl = firstResponse.data['@odata.nextLink'] || null;
-
-    if (pageMode === '1' || pageMode === 'first') {
-      return res.json({
-        data: firstPage,
-        total: totalCount,
-        hasMore: !!nextUrl,
-        nextLink: null,
-      });
-    }
-
-    const allRecords = [...firstPage];
-    while (nextUrl) {
-      const nextResponse = await axios.get(nextUrl, { headers });
-      const pageRecords = nextResponse.data.value || [];
-      allRecords.push(...pageRecords);
-      nextUrl = nextResponse.data['@odata.nextLink'] || null;
-    }
-
-    res.json({
-      data: allRecords,
-      total: totalCount,
-      hasMore: false,
-      nextLink: null,
+    // First fetch one packing record to get a real order GUID
+    const packingRes = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' },
+      params: { $select: '_cr7e4_ordernumber_value', $top: 1, $filter: '_cr7e4_ordernumber_value ne null' }
     });
+    const orderGuid = packingRes.data.value?.[0]?._cr7e4_ordernumber_value;
+    if (!orderGuid) return res.json({ message: 'No packing record found with an order number linked' });
 
+    // Fetch that production order record with all its fields
+    const orderRes = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/cr7e4_production_orderses(${orderGuid})`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    res.json({ orderGuid, fields: orderRes.data });
   } catch (error) {
-    res.status(500).json({ error: 'Dataverse fetch failed for generated orders', details: error.response?.data || error.message });
+    res.status(500).json({ error: 'Debug order fetch failed', details: error.response?.data || error.message });
   }
 });
 
 /* ===========================
-   PATCH SINGLE RECORD
+   DEBUG: NAVIGATION PROPERTIES ON PRODUCTION ORDERS TABLE
+   Call after deploy: GET /api/debug-order-navprops
+   Shows section master lookup nav prop name
+=========================== */
+app.get('/api/debug-order-navprops', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='cr7e4_production_orders')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+    });
+    res.json(response.data.value);
+  } catch (error) {
+    res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   DEBUG: NAV PROPS ON INVENTORY RECORDS TABLE
+   Call after deploy: GET /api/debug-navprops
 =========================== */
 app.patch('/api/packing-entries/:id', async (req, res) => {
   try {
@@ -280,6 +273,27 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Batch hold update failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   DEBUG: FIND NAVIGATION PROPERTY NAMES
+=========================== */
+app.get('/api/debug-navprops', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='cr7e4_inventory_records')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0'
+      }
+    });
+    res.json(response.data.value);
+  } catch (error) {
+    res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
   }
 });
 
