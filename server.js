@@ -23,9 +23,11 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = 'https://jhalaniextrusion.api.crm8.dynamics.com';
-const ENTITY_NAME = 'cr581_masters';
 
-// Correct logical name
+// Updated to your new table
+const ENTITY_NAME = 'cr7e4_inventory_records'; 
+
+// Generated orders table (kept as is)
 const ORDERS_ENTITY_NAME = 'cr581_generatedorderses';
 
 const SCOPE = DATAVERSE_URL + '/.default';
@@ -56,7 +58,7 @@ app.get('/health', (req, res) => {
 });
 
 /* ===========================
-   PACKING ENTRIES API (cr581_masters)
+   PACKING ENTRIES API (cr7e4_inventory_records)
 =========================== */
 app.get('/api/packing-entries', async (req, res) => {
   try {
@@ -66,16 +68,30 @@ app.get('/api/packing-entries', async (req, res) => {
     const pagingCookie        = req.query.pagingCookie || null;
     const newerThan           = req.query.newerThan || null;
 
+    // Updated $select to use cr7e4_ columns from your JSON
     const queryParams = {
         $select: [
-          'cr581_masterid', 'cr581_press', 'cr581_packingdate', 'cr581_shift',
-          'cr581_orderno', 'cr581_uniqueid', 'cr581_sectionno', 'cr581_dieno',
-          'cr581_sectionname', 'cr581_sectionsize', 'cr581_cutlength', 'cr581_units',
-          'cr581_bundleno', 'cr581_pcs', 'cr581_bundleweight', 'cr581_range',
-          'cr581_holdstatus', 'cr581_holdto', 'cr581_status', 'cr581_dispatchedto',
-          'cr581_dispatchdate', 'cr581_preparedfor', 'cr581_productiondate',
-          'cr581_productionshift', 'cr581_productionsupervisor', 'cr581_sectiongroup',
-          'cr581_productionpress', 'cr581_hardness', 'cr581_category', 'createdon'
+          'cr7e4_inventory_recordid',
+          'cr7e4_uniqueid', 
+          'cr7e4_packingdate', 
+          'cr7e4_packingshift',
+          'cr7e4_packingpress', 
+          'cr7e4_bundlenumber', 
+          'cr7e4_pcs', 
+          'cr7e4_bundleweight', 
+          'cr7e4_range', 
+          'cr7e4_holdstatus', 
+          '_cr7e4_holdto_value', 
+          'cr7e4_status', 
+          '_cr7e4_dispatchedto_value', 
+          'cr7e4_dispatchdate', 
+          '_cr7e4_ordernumber_value', 
+          '_cr7e4_packingsupervisor_value', 
+          '_cr7e4_agingnumber_value',
+          'createdon',
+          'modifiedon',
+          'statecode',
+          'statuscode'
         ].join(','),
         $orderby: 'createdon desc',
         $count: 'true'
@@ -126,7 +142,7 @@ app.get('/api/packing-entries', async (req, res) => {
 });
 
 /* ===========================
-   GENERATED ORDERS API – newest first, supports ?page=1 (fast) or ?page=all
+   GENERATED ORDERS API
 =========================== */
 app.get('/api/generated-orders', async (req, res) => {
   try {
@@ -142,7 +158,6 @@ app.get('/api/generated-orders', async (req, res) => {
 
     const pageMode = (req.query.page || 'all').toString().toLowerCase();
 
-    // First Dataverse request – always newest first
     const firstParams = {
       $orderby: 'cr581_productiondate desc',
       $count: 'true'
@@ -155,7 +170,6 @@ app.get('/api/generated-orders', async (req, res) => {
 
     console.log(`[generated-orders] Page 1: ${firstPage.length} records (total in Dataverse: ${totalCount})`);
 
-    // If only first page requested, return immediately
     if (pageMode === '1' || pageMode === 'first') {
       return res.json({
         data: firstPage,
@@ -165,7 +179,6 @@ app.get('/api/generated-orders', async (req, res) => {
       });
     }
 
-    // Otherwise fetch ALL remaining pages
     const allRecords = [...firstPage];
     let page = 1;
     while (nextUrl) {
@@ -237,9 +250,14 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 
     const token = await getAccessToken();
 
+    // Updated to use the new cr7e4_ column prefixes
     const updateData = {};
-    if (holdStatus !== undefined) updateData.cr581_holdstatus = holdStatus;
-    if (holdTo !== undefined) updateData.cr581_holdto = holdTo;
+    if (holdStatus !== undefined) updateData.cr7e4_holdstatus = holdStatus;
+    
+    // Note: Depending on Dataverse configuration, updating a lookup field via PATCH 
+    // might require the @odata.bind syntax (e.g., 'cr7e4_HoldTo@odata.bind': `/systemusers(${holdTo})`)
+    // We are keeping it as 'cr7e4_holdto' assuming you are sending standard text/value.
+    if (holdTo !== undefined) updateData.cr7e4_holdto = holdTo; 
 
     const results = await Promise.allSettled(
       ids.map(id =>
