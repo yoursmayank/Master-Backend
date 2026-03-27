@@ -92,6 +92,7 @@ app.get('/api/packing-entries', async (req, res) => {
         'statecode',
         'statuscode'
       ].join(','),
+      $expand: 'cr7e4_ordernumber',
       $orderby: 'createdon desc',
       $count: 'true'
     };
