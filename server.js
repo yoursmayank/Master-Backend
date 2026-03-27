@@ -89,8 +89,9 @@ app.get('/api/packing-entries', async (req, res) => {
         'statecode',
         'statuscode'
       ].join(','),
-      // Expand the production order relationship to pull section/order fields
-      $expand: 'cr7e4_OrderNumber',
+      // Expand production order → and within it expand section master
+      // Nav props follow PascalCase: cr7e4_OrderNumber, cr7e4_SectionNumber
+      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionname,cr7e4_sectionno,cr7e4_sectionsize,cr7e4_sectiongroup,cr7e4_hardness,cr7e4_category))',
       $orderby: 'createdon desc',
       $count: 'true'
     };
@@ -186,6 +187,48 @@ app.get('/api/debug-order-navprops', async (req, res) => {
     res.json(response.data.value);
   } catch (error) {
     res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   DEBUG: TEST EXPAND NAV PROP NAMES
+   GET /api/debug-expand
+=========================== */
+app.get('/api/debug-expand', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+      Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+    };
+
+    // Try each candidate nav prop name - first one that works wins
+    const candidates = [
+      'cr7e4_OrderNumber',
+      'cr7e4_ordernumber',
+      'cr7e4_ProductionOrder',
+      'cr7e4_productionorder',
+      'cr7e4_Order',
+      'cr7e4_order',
+    ];
+
+    const results = {};
+    for (const navProp of candidates) {
+      try {
+        const url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}?$top=1&$select=cr7e4_inventory_recordid&$expand=${navProp}`;
+        const resp = await axios.get(url, { headers });
+        const record = resp.data.value?.[0];
+        results[navProp] = record?.[navProp] ? 'SUCCESS - has data' : 'SUCCESS - but null/empty';
+      } catch (e) {
+        results[navProp] = `FAIL: ${e.response?.data?.error?.message || e.message}`;
+      }
+    }
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
