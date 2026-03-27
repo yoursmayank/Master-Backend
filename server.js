@@ -115,10 +115,7 @@ app.get('/api/packing-entries', async (req, res) => {
         'OData-Version': '4.0',
         Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
       },
-      params: {
-        ...queryParams,
-        $expand: 'cr7e4_ordernumber($select=cr581_ordernumber,cr581_customer)'
-      }
+      params: queryParams
     });
 
     let nextPageToken = null;
