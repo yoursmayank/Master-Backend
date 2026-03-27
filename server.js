@@ -89,9 +89,8 @@ app.get('/api/packing-entries', async (req, res) => {
         'statecode',
         'statuscode'
       ].join(','),
-      // Expand production order → and within it expand section master
-      // Nav props follow PascalCase: cr7e4_OrderNumber, cr7e4_SectionNumber
-      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionname,cr7e4_sectionno,cr7e4_sectionsize,cr7e4_sectiongroup,cr7e4_hardness,cr7e4_category))',
+      // Expand production order → and within it expand section master (no $select yet until field names confirmed)
+      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber)',
       $orderby: 'createdon desc',
       $count: 'true'
     };
@@ -187,6 +186,29 @@ app.get('/api/debug-order-navprops', async (req, res) => {
     res.json(response.data.value);
   } catch (error) {
     res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   DEBUG: INSPECT SECTION MASTER FIELDS
+   GET /api/debug-section
+=========================== */
+app.get('/api/debug-section', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+      Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+    };
+    // Use the section master GUID we already know from debug-order
+    const sectionGuid = '6cf0bad4-de22-f111-8341-7c1e523cad1f';
+    const resp = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/cr7e4_section_masters(${sectionGuid})`, { headers });
+    res.json(resp.data);
+  } catch (error) {
+    res.status(500).json({ error: error.response?.data || error.message });
   }
 });
 
