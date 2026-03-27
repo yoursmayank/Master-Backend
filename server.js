@@ -90,7 +90,7 @@ app.get('/api/packing-entries', async (req, res) => {
         'statuscode'
       ].join(','),
       // Expand the production order relationship to pull section/order fields
-      $expand: 'cr7e4_ordernumber',
+      $expand: 'cr7e4_OrderNumber',
       $orderby: 'createdon desc',
       $count: 'true'
     };
@@ -282,16 +282,20 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 app.get('/api/debug-navprops', async (req, res) => {
   try {
     const token = await getAccessToken();
-    const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='cr7e4_inventory_records')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
-    const response = await axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-        'OData-MaxVersion': '4.0',
-        'OData-Version': '4.0'
+    // Try both singular and plural logical names
+    const results = {};
+    for (const logicalName of ['cr7e4_inventory_record', 'cr7e4_inventory_records']) {
+      try {
+        const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='${logicalName}')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
+        const response = await axios.get(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+        });
+        results[logicalName] = response.data.value;
+      } catch (e) {
+        results[logicalName] = `Error: ${e.response?.data?.error?.message || e.message}`;
       }
-    });
-    res.json(response.data.value);
+    }
+    res.json(results);
   } catch (error) {
     res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
   }
