@@ -24,6 +24,11 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = process.env.ORG_URL;
 
+// Customer table credentials
+const CUSTOMER_TENANT_ID = process.env.TENANT_ID_CUSTOMERS || TENANT_ID;
+const CUSTOMER_CLIENT_ID = process.env.CLIEND_ID_CUSTOMERS || CLIENT_ID;
+const CUSTOMER_CLIENT_SECRET = process.env.CLIEND_SECRET_CUSTOMERS || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -50,9 +55,52 @@ async function getAccessToken() {
   return response.data.access_token;
 }
 
+async function getCustomerAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${CUSTOMER_TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', CUSTOMER_CLIENT_ID);
+  params.append('client_secret', CUSTOMER_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Backend running' });
 });
+
+/* ===========================
+   RESOLVE CUSTOMER GUID BY NAME
+   Looks up cr7e4_customers table by cr7e4_name to find the GUID.
+   Returns the GUID string or null if not found.
+=========================== */
+async function resolveCustomerGuid(customerName) {
+  try {
+    const token = await getCustomerAccessToken();
+    const resp = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/cr7e4_customers`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+      },
+      params: {
+        $select: 'cr7e4_customerid',
+        $filter: `cr7e4_name eq '${customerName.replace(/'/g, "''")}'`,
+        $top: 1
+      }
+    });
+    const record = resp.data.value?.[0];
+    return record?.cr7e4_customerid || null;
+  } catch (e) {
+    console.error('[resolveCustomerGuid] Failed:', e.response?.data || e.message);
+    return null;
+  }
+}
 
 /* ===========================
    PACKING ENTRIES API
@@ -319,6 +367,45 @@ app.get('/api/debug-aging', async (req, res) => {
 });
 
 /* ===========================
+   DEBUG: TEST CUSTOMER RESOLUTION + HOLD BIND
+   GET /api/debug-customer?name=Universal Material House
+=========================== */
+app.get('/api/debug-customer', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const name = req.query.name || '';
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+    };
+
+    // Step 1: try to list cr7e4_customers with top 3
+    let customerList = null;
+    try {
+      const r = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/cr7e4_customers`, {
+        headers,
+        params: { $top: 3 }
+      });
+      customerList = r.data.value;
+    } catch (e) {
+      customerList = `FAIL: ${e.response?.data?.error?.message || e.message}`;
+    }
+
+    // Step 2: resolve by name
+    let resolved = null;
+    if (name) {
+      resolved = await resolveCustomerGuid(name);
+    }
+
+    res.json({ customerList, resolvedGuid: resolved, searchedName: name });
+  } catch (error) {
+    res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
    DEBUG: NAV PROPS ON INVENTORY RECORDS TABLE
    Call after deploy: GET /api/debug-navprops
 =========================== */
@@ -331,12 +418,16 @@ app.patch('/api/packing-entries/:id', async (req, res) => {
       return res.status(400).json({ error: 'Missing id or update data' });
     }
 
+    const token = await getAccessToken();
+
     if (updateData.holdTo) {
-      updateData["cr7e4_holdto@odata.bind"] = `/systemusers(${updateData.holdTo})`;
+      const custGuid = await resolveCustomerGuid(updateData.holdTo);
+      if (custGuid) {
+        updateData["cr7e4_HoldTo@odata.bind"] = `/cr7e4_customers(${custGuid})`;
+      }
       delete updateData.holdTo;
     }
 
-    const token = await getAccessToken();
     const url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`;
 
     await axios.patch(url, updateData, {
@@ -370,7 +461,15 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 
     const updateData = {};
     if (holdStatus !== undefined) updateData.cr7e4_holdstatus = holdStatus;
-    if (holdTo !== undefined) updateData["cr7e4_holdto@odata.bind"] = `/systemusers(${holdTo})`;
+    if (holdTo) {
+      const custGuid = await resolveCustomerGuid(holdTo);
+      if (custGuid) {
+        updateData["cr7e4_HoldTo@odata.bind"] = `/cr7e4_customers(${custGuid})`;
+      }
+    } else if (holdTo === '') {
+      // Unhold: clear the lookup by setting it to null
+      updateData.cr7e4_HoldTo = null;
+    }
 
     const results = await Promise.allSettled(
       ids.map(id =>
