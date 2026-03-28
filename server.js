@@ -506,6 +506,7 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 
 /* ===========================
    BATCH DISPATCH UPDATE
+   Uses Dataverse OData $batch for max throughput (up to 1000 ops per batch request)
 =========================== */
 app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
   try {
@@ -531,33 +532,120 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       }
     }
 
-    const results = await Promise.allSettled(
-      ids.map(id =>
-        axios.patch(
-          `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
-          updateData,
+    const jsonBody = JSON.stringify(updateData);
+    const BATCH_LIMIT = 1000; // Dataverse max per $batch
+    const allFailed = [];
+    let totalSuccess = 0;
+
+    // Split into $batch requests of up to 1000
+    for (let start = 0; start < ids.length; start += BATCH_LIMIT) {
+      const chunk = ids.slice(start, start + BATCH_LIMIT);
+      const batchId = `batch_dispatch_${Date.now()}_${start}`;
+      const changesetId = `changeset_dispatch_${Date.now()}_${start}`;
+
+      // Build multipart $batch body
+      let batchBody = '';
+      batchBody += `--${batchId}\r\n`;
+      batchBody += `Content-Type: multipart/mixed; boundary=${changesetId}\r\n\r\n`;
+
+      chunk.forEach((id, idx) => {
+        batchBody += `--${changesetId}\r\n`;
+        batchBody += `Content-Type: application/http\r\n`;
+        batchBody += `Content-Transfer-Encoding: binary\r\n`;
+        batchBody += `Content-ID: ${idx + 1}\r\n\r\n`;
+        batchBody += `PATCH ${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id}) HTTP/1.1\r\n`;
+        batchBody += `Content-Type: application/json\r\n`;
+        batchBody += `If-Match: *\r\n\r\n`;
+        batchBody += `${jsonBody}\r\n`;
+      });
+
+      batchBody += `--${changesetId}--\r\n`;
+      batchBody += `--${batchId}--\r\n`;
+
+      try {
+        const batchRes = await axios.post(
+          `${DATAVERSE_URL}/api/data/v9.2/$batch`,
+          batchBody,
           {
             headers: {
               Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json',
+              'Content-Type': `multipart/mixed; boundary=${batchId}`,
               'OData-MaxVersion': '4.0',
               'OData-Version': '4.0',
-              'If-Match': '*'
-            }
+              Accept: 'application/json',
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
           }
-        )
-      )
-    );
+        );
 
-    const failed = results.filter(r => r.status === 'rejected').map((r, i) => ({
-      id: ids[i],
-      reason: r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown'
-    }));
+        // Parse response: if the changeset succeeds, all ops succeed (atomic).
+        // If it fails, Dataverse returns 4xx for the changeset — all ops in it fail.
+        const resText = typeof batchRes.data === 'string' ? batchRes.data : JSON.stringify(batchRes.data);
+        const hasError = resText.includes('"error"') || resText.includes('HTTP/1.1 4') || resText.includes('HTTP/1.1 5');
+
+        if (hasError) {
+          // Changeset failed — fall back to individual PATCHes for this chunk
+          const fallbackResults = await Promise.allSettled(
+            chunk.map(id =>
+              axios.patch(
+                `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
+                updateData,
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'OData-MaxVersion': '4.0',
+                    'OData-Version': '4.0',
+                    'If-Match': '*'
+                  }
+                }
+              )
+            )
+          );
+          fallbackResults.forEach((r, i) => {
+            if (r.status === 'rejected') {
+              allFailed.push({ id: chunk[i], reason: r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown' });
+            } else {
+              totalSuccess++;
+            }
+          });
+        } else {
+          totalSuccess += chunk.length;
+        }
+      } catch (batchErr) {
+        // $batch request itself failed — fall back to individual PATCHes
+        const fallbackResults = await Promise.allSettled(
+          chunk.map(id =>
+            axios.patch(
+              `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
+              updateData,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'OData-MaxVersion': '4.0',
+                  'OData-Version': '4.0',
+                  'If-Match': '*'
+                }
+              }
+            )
+          )
+        );
+        fallbackResults.forEach((r, i) => {
+          if (r.status === 'rejected') {
+            allFailed.push({ id: chunk[i], reason: r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown' });
+          } else {
+            totalSuccess++;
+          }
+        });
+      }
+    }
 
     res.json({
-      success: ids.length - failed.length,
-      failed: failed.length,
-      errors: failed
+      success: totalSuccess,
+      failed: allFailed.length,
+      errors: allFailed
     });
   } catch (error) {
     res.status(500).json({ error: 'Batch dispatch update failed', details: error.response?.data || error.message });
