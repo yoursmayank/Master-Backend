@@ -84,13 +84,14 @@ app.get('/api/packing-entries', async (req, res) => {
         '_cr7e4_ordernumber_value',
         '_cr7e4_packingsupervisor_value',
         '_cr7e4_agingnumber_value',
+        'cr7e4_category',
         'createdon',
         'modifiedon',
         'statecode',
         'statuscode'
       ].join(','),
-      // Expand production order → and within it expand section master (no $select yet until field names confirmed)
-      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber)',
+      // Expand production order → and within it expand section master
+      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize,cr7e4_sectiongroup)),cr7e4_AgingNumber($select=cr7e4_tensilestrength)',
       $orderby: 'createdon desc',
       $count: 'true'
     };
@@ -251,6 +252,68 @@ app.get('/api/debug-expand', async (req, res) => {
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+/* ===========================
+   DEBUG: INSPECT RAW INVENTORY RECORD (AGING + CATEGORY)
+   GET /api/debug-aging
+   Shows raw fields on a sample inventory record including aging expand + category
+=========================== */
+app.get('/api/debug-aging', async (req, res) => {
+  try {
+    const token = await getAccessToken();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+      Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+    };
+
+    // Step 1: get one record where aging number is linked
+    const findRes = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}`, {
+      headers,
+      params: { $select: 'cr7e4_inventory_recordid,_cr7e4_agingnumber_value,cr7e4_category', $top: 1, $filter: '_cr7e4_agingnumber_value ne null' }
+    });
+    const record = findRes.data.value?.[0];
+    if (!record) return res.json({ message: 'No record found with aging number linked' });
+
+    const agingGuid = record._cr7e4_agingnumber_value;
+    const recordId = record.cr7e4_inventory_recordid;
+
+    // Step 2: try expanding the aging record via candidate nav prop names
+    const agingCandidates = ['cr7e4_AgingNumber', 'cr7e4_agingnumber', 'cr7e4_Agingnumber'];
+    const expandResults = {};
+    for (const navProp of agingCandidates) {
+      try {
+        const r = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${recordId})`, {
+          headers,
+          params: { $select: 'cr7e4_inventory_recordid,cr7e4_category', $expand: navProp }
+        });
+        expandResults[navProp] = r.data[navProp] !== undefined ? { result: r.data[navProp] } : 'key_missing';
+      } catch (e) {
+        expandResults[navProp] = `FAIL: ${e.response?.data?.error?.message || e.message}`;
+      }
+    }
+
+    // Step 3: fetch the aging record directly
+    let agingDirect = null;
+    try {
+      const ar = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/cr7e4_aging_records_lineses(${agingGuid})`, { headers });
+      agingDirect = ar.data;
+    } catch (e) {
+      agingDirect = `FAIL: ${e.response?.data?.error?.message || e.message}`;
+    }
+
+    res.json({
+      inventoryRecord: record,
+      agingGuid,
+      expandResults,
+      agingDirectFetch: agingDirect
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.response?.data || error.message });
   }
 });
 
