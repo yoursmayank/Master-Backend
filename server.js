@@ -505,6 +505,66 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 });
 
 /* ===========================
+   BATCH DISPATCH UPDATE
+=========================== */
+app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
+  try {
+    const { ids, dispatchTo, dispatchDate, category } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    const token = await getAccessToken();
+
+    const updateData = {};
+    updateData.cr7e4_status = 285960001;       // DISPATCHED
+    updateData.cr7e4_holdstatus = 285960002;   // N/A
+
+    if (dispatchDate) updateData.cr7e4_dispatchdate = dispatchDate;
+    if (category !== undefined) updateData.cr7e4_category = category;
+
+    if (dispatchTo) {
+      const custGuid = await resolveCustomerGuid(dispatchTo);
+      if (custGuid) {
+        updateData["cr7e4_DispatchedTo@odata.bind"] = `/cr7e4_customers(${custGuid})`;
+      }
+    }
+
+    const results = await Promise.allSettled(
+      ids.map(id =>
+        axios.patch(
+          `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
+          updateData,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'OData-MaxVersion': '4.0',
+              'OData-Version': '4.0',
+              'If-Match': '*'
+            }
+          }
+        )
+      )
+    );
+
+    const failed = results.filter(r => r.status === 'rejected').map((r, i) => ({
+      id: ids[i],
+      reason: r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown'
+    }));
+
+    res.json({
+      success: ids.length - failed.length,
+      failed: failed.length,
+      errors: failed
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Batch dispatch update failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
    CUSTOMER MASTER CRUD
 =========================== */
 const CUSTOMER_ENTITY = 'cr7e4_customers';
