@@ -505,6 +505,103 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 });
 
 /* ===========================
+   CUSTOMER MASTER CRUD
+=========================== */
+const CUSTOMER_ENTITY = 'cr7e4_customers';
+
+// GET all customers
+app.get('/api/customers', async (req, res) => {
+  try {
+    const token = await getCustomerAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${CUSTOMER_ENTITY}`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      },
+      params: {
+        $select: 'cr7e4_customerid,cr7e4_companyname,cr7e4_customercode,cr7e4_contactperson,cr7e4_phonenumber,cr7e4_alternatephonenumber,cr7e4_alternatecontactperson,cr7e4_email,cr7e4_addressline1,cr7e4_addressline2,cr7e4_city,cr7e4_district,cr7e4_state,cr7e4_country,cr7e4_pincode,createdon,modifiedon',
+        $orderby: 'cr7e4_companyname asc'
+      }
+    });
+    res.json({ data: response.data.value });
+  } catch (error) {
+    console.error('[GET /api/customers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch customers', details: error.response?.data || error.message });
+  }
+});
+
+// POST create a new customer
+app.post('/api/customers', async (req, res) => {
+  try {
+    const token = await getCustomerAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${CUSTOMER_ENTITY}`;
+    const body = req.body;
+
+    const response = await axios.post(url, body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation'
+      }
+    });
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('[POST /api/customers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create customer', details: error.response?.data || error.message });
+  }
+});
+
+// PATCH update a customer
+app.patch('/api/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getCustomerAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${CUSTOMER_ENTITY}(${id})`;
+
+    await axios.patch(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        'If-Match': '*'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[PATCH /api/customers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to update customer', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE a customer
+app.delete('/api/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getCustomerAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${CUSTOMER_ENTITY}(${id})`;
+
+    await axios.delete(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[DELETE /api/customers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete customer', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
    DEBUG: FIND NAVIGATION PROPERTY NAMES
 =========================== */
 app.get('/api/debug-navprops', async (req, res) => {
