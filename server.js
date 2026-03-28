@@ -90,7 +90,7 @@ async function resolveCustomerGuid(customerName) {
       },
       params: {
         $select: 'cr7e4_customerid',
-        $filter: `cr7e4_name eq '${customerName.replace(/'/g, "''")}'`,
+        $filter: `cr7e4_companyname eq '${customerName.replace(/'/g, "''")}'`,
         $top: 1
       }
     });
