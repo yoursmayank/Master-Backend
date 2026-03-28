@@ -491,7 +491,7 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 
     const failed = results.filter(r => r.status === 'rejected').map((r, i) => ({
       id: ids[i],
-      reason: r.reason?.message || 'unknown'
+      reason: r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown'
     }));
 
     res.json({
