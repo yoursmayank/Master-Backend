@@ -37,6 +37,14 @@ const SECTION_CLIENT_SECRET = process.env.CLIENT_SECRET_SECTIONS || CLIENT_SECRE
 const DIE_CLIENT_ID = process.env.CLIENT_ID_DIE || CLIENT_ID;
 const DIE_CLIENT_SECRET = process.env.CLIENT_SECRET_DIE || CLIENT_SECRET;
 
+// Orders Headers credentials
+const ORDERS_HEADERS_CLIENT_ID = process.env.CLIENT_ID_ORDERS_HEADERS || CLIENT_ID;
+const ORDERS_HEADERS_CLIENT_SECRET = process.env.CLIENT_SECRET_ORDERS_HEADERS || CLIENT_SECRET;
+
+// Orders Lines credentials
+const ORDERS_LINES_CLIENT_ID = process.env.CLIENT_ID_ORDERS_LINES || CLIENT_ID;
+const ORDERS_LINES_CLIENT_SECRET = process.env.CLIENT_SECRET_ORDERS_LINES || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -97,6 +105,34 @@ async function getDieAccessToken() {
   params.append('grant_type', 'client_credentials');
   params.append('client_id', DIE_CLIENT_ID);
   params.append('client_secret', DIE_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getOrdersHeadersAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', ORDERS_HEADERS_CLIENT_ID);
+  params.append('client_secret', ORDERS_HEADERS_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getOrdersLinesAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', ORDERS_LINES_CLIENT_ID);
+  params.append('client_secret', ORDERS_LINES_CLIENT_SECRET);
   params.append('scope', SCOPE);
 
   const response = await axios.post(tokenUrl, params, {
@@ -914,6 +950,367 @@ app.get('/api/debug-navprops', async (req, res) => {
     // Try both singular and plural logical names
     const results = {};
     for (const logicalName of ['cr7e4_inventory_record', 'cr7e4_inventory_records']) {
+      try {
+        const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='${logicalName}')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
+        const response = await axios.get(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+        });
+        results[logicalName] = response.data.value;
+      } catch (e) {
+        results[logicalName] = `Error: ${e.response?.data?.error?.message || e.message}`;
+      }
+    }
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   ORDERS HEADERS API
+   Entity: cr7e4_orders_headers
+=========================== */
+
+// GET all order headers
+app.get('/api/orders-headers', async (req, res) => {
+  try {
+    const token = await getOrdersHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000'
+      },
+      params: {
+        $orderby: 'createdon desc',
+        $count: 'true'
+      }
+    });
+    res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
+  } catch (error) {
+    console.error('[GET /api/orders-headers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch order headers', details: error.response?.data || error.message });
+  }
+});
+
+// GET single order header by ID
+app.get('/api/orders-headers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getOrdersHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers(${id})`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('[GET /api/orders-headers/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch order header', details: error.response?.data || error.message });
+  }
+});
+
+// POST create order header
+app.post('/api/orders-headers', async (req, res) => {
+  try {
+    const token = await getOrdersHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers`;
+    const response = await axios.post(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation'
+      }
+    });
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('[POST /api/orders-headers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create order header', details: error.response?.data || error.message });
+  }
+});
+
+// PATCH update order header
+app.patch('/api/orders-headers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getOrdersHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers(${id})`;
+    await axios.patch(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        'If-Match': '*'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[PATCH /api/orders-headers/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to update order header', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE order header
+app.delete('/api/orders-headers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getOrdersHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers(${id})`;
+    await axios.delete(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[DELETE /api/orders-headers/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete order header', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Discover all columns on orders_headers
+app.get('/api/debug-orders-headers-columns', async (req, res) => {
+  try {
+    const token = await getOrdersHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers?$top=1`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in cr7e4_orders_headers' });
+    const columns = Object.keys(record).sort();
+    res.json({ totalColumns: columns.length, columns, sampleRecord: record });
+  } catch (error) {
+    console.error('[DEBUG orders-headers-columns] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch order header columns', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Navigation properties on orders_headers
+app.get('/api/debug-orders-headers-navprops', async (req, res) => {
+  try {
+    const token = await getOrdersHeadersAccessToken();
+    const results = {};
+    for (const logicalName of ['cr7e4_orders_header', 'cr7e4_orders_headers']) {
+      try {
+        const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='${logicalName}')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
+        const response = await axios.get(url, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+        });
+        results[logicalName] = response.data.value;
+      } catch (e) {
+        results[logicalName] = `Error: ${e.response?.data?.error?.message || e.message}`;
+      }
+    }
+    res.json(results);
+  } catch (error) {
+    res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   ORDERS LINES API
+   Entity: cr7e4_orderses
+=========================== */
+
+// GET all order lines
+app.get('/api/orders-lines', async (req, res) => {
+  try {
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+    const queryParams = {
+      $orderby: 'createdon desc',
+      $count: 'true'
+    };
+    // Optional: filter by order header ID
+    if (req.query.headerId) {
+      queryParams.$filter = `_cr7e4_orderheaderid_value eq ${req.query.headerId}`;
+    }
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000'
+      },
+      params: queryParams
+    });
+    res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
+  } catch (error) {
+    console.error('[GET /api/orders-lines] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch order lines', details: error.response?.data || error.message });
+  }
+});
+
+// GET single order line by ID
+app.get('/api/orders-lines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses(${id})`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('[GET /api/orders-lines/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch order line', details: error.response?.data || error.message });
+  }
+});
+
+// POST create order line
+app.post('/api/orders-lines', async (req, res) => {
+  try {
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+    const response = await axios.post(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation'
+      }
+    });
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('[POST /api/orders-lines] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create order line', details: error.response?.data || error.message });
+  }
+});
+
+// POST batch create order lines (for bulk order submission)
+app.post('/api/orders-lines/batch', async (req, res) => {
+  try {
+    const { lines } = req.body;
+    if (!lines || !Array.isArray(lines) || lines.length === 0) {
+      return res.status(400).json({ error: 'lines array is required' });
+    }
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+    const results = await Promise.allSettled(
+      lines.map(line =>
+        axios.post(url, line, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            Prefer: 'return=representation'
+          }
+        })
+      )
+    );
+    const created = results.filter(r => r.status === 'fulfilled').map(r => r.value.data);
+    const failed = results.filter(r => r.status === 'rejected').map((r, i) => ({
+      index: i,
+      reason: r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown'
+    }));
+    res.json({ success: created.length, failed: failed.length, created, errors: failed });
+  } catch (error) {
+    console.error('[POST /api/orders-lines/batch] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Batch create failed', details: error.response?.data || error.message });
+  }
+});
+
+// PATCH update order line
+app.patch('/api/orders-lines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses(${id})`;
+    await axios.patch(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        'If-Match': '*'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[PATCH /api/orders-lines/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to update order line', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE order line
+app.delete('/api/orders-lines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses(${id})`;
+    await axios.delete(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[DELETE /api/orders-lines/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete order line', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Discover all columns on cr7e4_orderses (order lines)
+app.get('/api/debug-orders-lines-columns', async (req, res) => {
+  try {
+    const token = await getOrdersLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses?$top=1`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in cr7e4_orderses' });
+    const columns = Object.keys(record).sort();
+    res.json({ totalColumns: columns.length, columns, sampleRecord: record });
+  } catch (error) {
+    console.error('[DEBUG orders-lines-columns] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch order lines columns', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Navigation properties on cr7e4_orderses
+app.get('/api/debug-orders-lines-navprops', async (req, res) => {
+  try {
+    const token = await getOrdersLinesAccessToken();
+    const results = {};
+    for (const logicalName of ['cr7e4_orders', 'cr7e4_orderses']) {
       try {
         const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='${logicalName}')/ManyToOneRelationships?$select=SchemaName,ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName`;
         const response = await axios.get(url, {
