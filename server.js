@@ -29,6 +29,14 @@ const CUSTOMER_TENANT_ID = process.env.TENANT_ID_CUSTOMERS || TENANT_ID;
 const CUSTOMER_CLIENT_ID = process.env.CLIEND_ID_CUSTOMERS || CLIENT_ID;
 const CUSTOMER_CLIENT_SECRET = process.env.CLIEND_SECRET_CUSTOMERS || CLIENT_SECRET;
 
+// Section Masters credentials
+const SECTION_CLIENT_ID = process.env.CLIENT_ID_SECTIONS || CLIENT_ID;
+const SECTION_CLIENT_SECRET = process.env.CLIENT_SECRET_SECTIONS || CLIENT_SECRET;
+
+// Die Masters credentials
+const DIE_CLIENT_ID = process.env.CLIENT_ID_DIE || CLIENT_ID;
+const DIE_CLIENT_SECRET = process.env.CLIENT_SECRET_DIE || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -61,6 +69,34 @@ async function getCustomerAccessToken() {
   params.append('grant_type', 'client_credentials');
   params.append('client_id', CUSTOMER_CLIENT_ID);
   params.append('client_secret', CUSTOMER_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getSectionAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', SECTION_CLIENT_ID);
+  params.append('client_secret', SECTION_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getDieAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', DIE_CLIENT_ID);
+  params.append('client_secret', DIE_CLIENT_SECRET);
   params.append('scope', SCOPE);
 
   const response = await axios.post(tokenUrl, params, {
@@ -649,6 +685,126 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Batch dispatch update failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   SECTION MASTERS API
+=========================== */
+
+// Auto-discover section entity set name (Dataverse pluralization varies)
+let sectionEntitySet = null;
+
+async function discoverSectionEntitySet(token) {
+  const candidates = ['cr7e4_section_masterses', 'cr7e4_section_masters', 'cr7e4_section_masterss'];
+  for (const name of candidates) {
+    try {
+      const resp = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/${name}?$top=1`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0'
+        }
+      });
+      if (resp.status === 200) {
+        console.log(`[sections] Discovered entity set: ${name}`);
+        sectionEntitySet = name;
+        return name;
+      }
+    } catch (e) {
+      // Try next candidate
+    }
+  }
+  throw new Error('Could not discover section entity set name. Tried: ' + candidates.join(', '));
+}
+
+// GET all sections
+app.get('/api/sections', async (req, res) => {
+  try {
+    const token = await getSectionAccessToken();
+
+    if (!sectionEntitySet) {
+      await discoverSectionEntitySet(token);
+    }
+
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${sectionEntitySet}`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      },
+      params: {
+        $orderby: 'createdon desc'
+      }
+    });
+    res.json({ data: response.data.value });
+  } catch (error) {
+    console.error('[GET /api/sections] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch sections', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   DIE MASTERS API
+=========================== */
+
+// Auto-discover die entity set name
+let dieEntitySet = null;
+
+async function discoverDieEntitySet(token) {
+  const candidates = ['cr7e4_die_masterses', 'cr7e4_die_masters', 'cr7e4_die_masterss'];
+  for (const name of candidates) {
+    try {
+      const resp = await axios.get(`${DATAVERSE_URL}/api/data/v9.2/${name}?$top=1`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0'
+        }
+      });
+      if (resp.status === 200) {
+        console.log(`[dies] Discovered entity set: ${name}`);
+        dieEntitySet = name;
+        return name;
+      }
+    } catch (e) {
+      // Try next candidate
+    }
+  }
+  throw new Error('Could not discover die entity set name. Tried: ' + candidates.join(', '));
+}
+
+// GET all dies
+app.get('/api/dies', async (req, res) => {
+  try {
+    const token = await getDieAccessToken();
+
+    if (!dieEntitySet) {
+      await discoverDieEntitySet(token);
+    }
+
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      },
+      params: {
+        $orderby: 'createdon desc'
+      }
+    });
+    res.json({ data: response.data.value });
+  } catch (error) {
+    console.error('[GET /api/dies] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch dies', details: error.response?.data || error.message });
   }
 });
 
