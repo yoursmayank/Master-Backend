@@ -784,6 +784,20 @@ app.get('/api/sections', async (req, res) => {
   }
 });
 
+// GET section entity set name (used by frontend to build OData bind strings directly)
+app.get('/api/sections-entityset', async (req, res) => {
+  try {
+    const token = await getSectionAccessToken();
+    if (!sectionEntitySet) {
+      await discoverSectionEntitySet(token);
+    }
+    res.json({ entitySet: sectionEntitySet });
+  } catch (error) {
+    console.error('[GET /api/sections-entityset] Error:', error.message);
+    res.status(500).json({ error: 'Failed to discover section entity set', details: error.message });
+  }
+});
+
 /* ===========================
    DIE MASTERS API
 =========================== */
@@ -1023,7 +1037,13 @@ app.post('/api/orders-headers', async (req, res) => {
   try {
     const token = await getOrdersHeadersAccessToken();
     const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers`;
-    const response = await axios.post(url, req.body, {
+    const body = { ...req.body };
+    // Convert customerId to OData bind
+    if (body.customerId) {
+      body['cr7e4_Customer@odata.bind'] = `/cr7e4_customers(${body.customerId})`;
+      delete body.customerId;
+    }
+    const response = await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -1132,6 +1152,25 @@ app.get('/api/debug-orders-headers-navprops', async (req, res) => {
    Entity: cr7e4_orderses
 =========================== */
 
+// Helper: convert friendly IDs to Dataverse @odata.bind
+async function buildOrderLineBody(line, token) {
+  const body = { ...line };
+  if (body.headerId) {
+    body['cr7e4_OrderNumberL@odata.bind'] = `/cr7e4_orders_headers(${body.headerId})`;
+    delete body.headerId;
+  }
+  if (body.sectionId) {
+    // Ensure section entity set is discovered
+    if (!sectionEntitySet) {
+      try { await discoverSectionEntitySet(token); } catch (e) { console.warn('[buildOrderLineBody] Section discovery failed:', e.message); }
+    }
+    const setName = sectionEntitySet || 'cr7e4_section_masterses';
+    body['cr7e4_SectionNumber@odata.bind'] = `/${setName}(${body.sectionId})`;
+    delete body.sectionId;
+  }
+  return body;
+}
+
 // GET all order lines
 app.get('/api/orders-lines', async (req, res) => {
   try {
@@ -1143,7 +1182,7 @@ app.get('/api/orders-lines', async (req, res) => {
     };
     // Optional: filter by order header ID
     if (req.query.headerId) {
-      queryParams.$filter = `_cr7e4_orderheaderid_value eq ${req.query.headerId}`;
+      queryParams.$filter = `_cr7e4_ordernumberl_value eq ${req.query.headerId}`;
     }
     const response = await axios.get(url, {
       headers: {
@@ -1189,7 +1228,8 @@ app.post('/api/orders-lines', async (req, res) => {
   try {
     const token = await getOrdersLinesAccessToken();
     const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
-    const response = await axios.post(url, req.body, {
+    const body = await buildOrderLineBody(req.body, token);
+    const response = await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -1214,8 +1254,10 @@ app.post('/api/orders-lines/batch', async (req, res) => {
     }
     const token = await getOrdersLinesAccessToken();
     const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+    // Build all line bodies (converts IDs to binds)
+    const builtLines = await Promise.all(lines.map(l => buildOrderLineBody(l, token)));
     const results = await Promise.allSettled(
-      lines.map(line =>
+      builtLines.map(line =>
         axios.post(url, line, {
           headers: {
             Authorization: `Bearer ${token}`,
