@@ -45,6 +45,14 @@ const ORDERS_HEADERS_CLIENT_SECRET = process.env.CLIENT_SECRET_ORDERS_HEADERS ||
 const ORDERS_LINES_CLIENT_ID = process.env.CLIENT_ID_ORDERS_LINES || CLIENT_ID;
 const ORDERS_LINES_CLIENT_SECRET = process.env.CLIENT_SECRET_ORDERS_LINES || CLIENT_SECRET;
 
+// Foundry Headers credentials
+const FOUNDRY_HEADERS_CLIENT_ID = process.env.CLIENT_ID_FOUNDRY_HEADERS || CLIENT_ID;
+const FOUNDRY_HEADERS_CLIENT_SECRET = process.env.CLIENT_SECRET_FOUNDRY_HEADERS || CLIENT_SECRET;
+
+// Foundry Lines credentials
+const FOUNDRY_LINES_CLIENT_ID = process.env.CLIENT_ID_FOUNDRY_LINES || CLIENT_ID;
+const FOUNDRY_LINES_CLIENT_SECRET = process.env.CLIENT_SECRET_FOUNDRY_LINES || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -133,6 +141,34 @@ async function getOrdersLinesAccessToken() {
   params.append('grant_type', 'client_credentials');
   params.append('client_id', ORDERS_LINES_CLIENT_ID);
   params.append('client_secret', ORDERS_LINES_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getFoundryHeadersAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', FOUNDRY_HEADERS_CLIENT_ID);
+  params.append('client_secret', FOUNDRY_HEADERS_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getFoundryLinesAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', FOUNDRY_LINES_CLIENT_ID);
+  params.append('client_secret', FOUNDRY_LINES_CLIENT_SECRET);
   params.append('scope', SCOPE);
 
   const response = await axios.post(tokenUrl, params, {
@@ -1366,6 +1402,166 @@ app.get('/api/debug-orders-lines-navprops', async (req, res) => {
     res.json(results);
   } catch (error) {
     res.status(500).json({ error: 'Metadata fetch failed', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   FOUNDRY RECORDS HEADERS API
+   Entity: cr7e4_foundry_records_headers
+=========================== */
+
+// GET all foundry record headers
+app.get('/api/foundry-headers', async (req, res) => {
+  try {
+    const token = await getFoundryHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_foundry_records_headers`;
+    const queryParams = {
+      $orderby: 'createdon desc',
+      $count: 'true'
+    };
+    if (req.query.top) queryParams.$top = parseInt(req.query.top, 10);
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000'
+      },
+      params: queryParams
+    });
+    res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
+  } catch (error) {
+    console.error('[GET /api/foundry-headers] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch foundry headers', details: error.response?.data || error.message });
+  }
+});
+
+// GET single foundry header by ID
+app.get('/api/foundry-headers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getFoundryHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_foundry_records_headers(${id})`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('[GET /api/foundry-headers/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch foundry header', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Discover all columns on cr7e4_foundry_records_headers
+app.get('/api/debug-foundry-headers-columns', async (req, res) => {
+  try {
+    const token = await getFoundryHeadersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_foundry_records_headers?$top=1`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in cr7e4_foundry_records_headers' });
+    const columns = Object.keys(record).sort();
+    res.json({ totalColumns: columns.length, columns, sampleRecord: record });
+  } catch (error) {
+    console.error('[DEBUG foundry-headers-columns] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch foundry headers columns', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   FOUNDRY RECORDS LINES API
+   Entity: cr7e4_foundry_records_lineses
+=========================== */
+
+// GET all foundry record lines
+app.get('/api/foundry-lines', async (req, res) => {
+  try {
+    const token = await getFoundryLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_foundry_records_lineses`;
+    const queryParams = {
+      $orderby: 'createdon desc',
+      $count: 'true'
+    };
+    if (req.query.top) queryParams.$top = parseInt(req.query.top, 10);
+    // Optional: filter by header ID — tries common lookup field naming patterns
+    if (req.query.headerId) {
+      queryParams.$filter = `_cr7e4_header_value eq ${req.query.headerId}`;
+    }
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000'
+      },
+      params: queryParams
+    });
+    res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
+  } catch (error) {
+    console.error('[GET /api/foundry-lines] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch foundry lines', details: error.response?.data || error.message });
+  }
+});
+
+// GET single foundry line by ID
+app.get('/api/foundry-lines/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getFoundryLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_foundry_records_lineses(${id})`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('[GET /api/foundry-lines/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch foundry line', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Discover all columns on cr7e4_foundry_records_lineses
+app.get('/api/debug-foundry-lines-columns', async (req, res) => {
+  try {
+    const token = await getFoundryLinesAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_foundry_records_lineses?$top=1`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+      }
+    });
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in cr7e4_foundry_records_lineses' });
+    const columns = Object.keys(record).sort();
+    res.json({ totalColumns: columns.length, columns, sampleRecord: record });
+  } catch (error) {
+    console.error('[DEBUG foundry-lines-columns] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch foundry lines columns', details: error.response?.data || error.message });
   }
 });
 
