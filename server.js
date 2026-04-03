@@ -1026,6 +1026,15 @@ app.get('/api/orders-headers', async (req, res) => {
   try {
     const token = await getOrdersHeadersAccessToken();
     const url = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orders_headers`;
+    const queryParams = {
+      $orderby: 'createdon desc',
+      $count: 'true'
+    };
+    // Optional: filter by order number
+    if (req.query.orderNo) {
+      const safe = String(req.query.orderNo).replace(/'/g, "''");
+      queryParams.$filter = `cr7e4_ordernumber eq '${safe}'`;
+    }
     const response = await axios.get(url, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -1034,10 +1043,7 @@ app.get('/api/orders-headers', async (req, res) => {
         'OData-Version': '4.0',
         Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000'
       },
-      params: {
-        $orderby: 'createdon desc',
-        $count: 'true'
-      }
+      params: queryParams
     });
     res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
   } catch (error) {
@@ -1356,6 +1362,56 @@ app.delete('/api/orders-lines/:id', async (req, res) => {
   } catch (error) {
     console.error('[DELETE /api/orders-lines/:id] Error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to delete order line', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE all lines for an order (by header ID, with orderNo fallback)
+app.delete('/api/orders-lines/by-header/:headerId', async (req, res) => {
+  try {
+    const { headerId } = req.params;
+    const orderNo = req.query.orderNo ? String(req.query.orderNo) : null;
+    const token = await getOrdersLinesAccessToken();
+    const baseUrl = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+
+    // Build OData filter: match on the lookup field AND/OR the plain orderNo string
+    let filter = `_cr7e4_ordernumberl_value eq ${headerId}`;
+    if (orderNo) {
+      const safe = orderNo.replace(/'/g, "''");
+      filter = `(${filter}) or (cr7e4_ordernumber eq '${safe}')`;
+    }
+
+    const fetchRes = await axios.get(baseUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+      },
+      params: { $select: 'cr7e4_ordersid', $filter: filter }
+    });
+
+    const lines = fetchRes.data.value || [];
+    if (lines.length === 0) {
+      return res.json({ deleted: 0 });
+    }
+
+    // De-duplicate in case both filter arms matched the same record
+    const uniqueIds = [...new Set(lines.map(l => l.cr7e4_ordersid))];
+
+    await Promise.all(uniqueIds.map(id =>
+      axios.delete(`${baseUrl}(${id})`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0'
+        }
+      })
+    ));
+
+    res.json({ deleted: uniqueIds.length });
+  } catch (error) {
+    console.error('[DELETE /api/orders-lines/by-header] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete order lines', details: error.response?.data || error.message });
   }
 });
 
