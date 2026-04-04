@@ -906,6 +906,57 @@ app.delete('/api/sections/:id', async (req, res) => {
   }
 });
 
+// POST bulk create sections
+// Body: { rows: [ { cr7e4_sectionnumber, cr7e4_sectionname, ... }, ... ] }
+app.post('/api/sections/bulk', async (req, res) => {
+  const rows = req.body?.rows;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'rows array is required and must not be empty' });
+  }
+  try {
+    const token = await getSectionAccessToken();
+    if (!sectionEntitySet) {
+      await discoverSectionEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${sectionEntitySet}`;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'OData-MaxVersion': '4.0',
+      'OData-Version': '4.0',
+    };
+    const numericFields = ['cr7e4_widthmm', 'cr7e4_heightmm', 'cr7e4_thicknessmm', 'cr7e4_rangefrommm', 'cr7e4_rangetomm'];
+    const results = [];
+    for (const row of rows) {
+      const payload = { ...row };
+      numericFields.forEach(f => {
+        if (payload[f] !== undefined && payload[f] !== '') {
+          const n = parseFloat(payload[f]);
+          if (!isNaN(n)) payload[f] = n;
+          else delete payload[f];
+        } else {
+          delete payload[f];
+        }
+      });
+      try {
+        const resp = await axios.post(url, payload, { headers: { ...headers, Prefer: 'return=minimal' } });
+        results.push({ success: true, sectionnumber: row.cr7e4_sectionnumber });
+      } catch (err) {
+        results.push({
+          success: false,
+          sectionnumber: row.cr7e4_sectionnumber,
+          error: err.response?.data?.error?.message || err.message
+        });
+      }
+    }
+    const failed = results.filter(r => !r.success);
+    res.json({ total: rows.length, succeeded: results.length - failed.length, failed: failed.length, results });
+  } catch (error) {
+    console.error('[POST /api/sections/bulk] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Bulk create failed', details: error.response?.data || error.message });
+  }
+});
+
 /* ===========================
    DIE MASTERS API
 =========================== */
