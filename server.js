@@ -1897,18 +1897,24 @@ const PRODUCTION_ORDERS_ENTITY = 'cr7e4_production_orderses';
 const PRODUCTION_ORDERS_SELECT = [
   'cr7e4_production_ordersid',
   'cr7e4_ordernumber',
+  'cr7e4_parentordernumber',
   'cr7e4_productiondate',
+  'cr7e4_orderdate',
+  'cr7e4_dispatchdate',
   'cr7e4_productionshift',
   'cr7e4_productionpress',
   'cr7e4_cutlength',
   'cr7e4_clunit',
   'cr7e4_rangefrom',
   'cr7e4_rangeto',
-  'cr7e4_orderstatus',
-  'cr7e4_planneddate',
-  'cr7e4_duedate',
-  'cr7e4_totalweight',
-  'cr7e4_plnumber',
+  'cr7e4_productionstatus',
+  'cr7e4_completedkgs',
+  'cr7e4_completedpcs',
+  'cr7e4_productionquantity',
+  'cr7e4_customername',
+  'cr7e4_sectionnumbername',
+  'cr7e4_dienumbername',
+  'cr7e4_productionsupervisorname',
   '_cr7e4_sectionnumber_value',
   '_cr7e4_dienumber_value',
   '_cr7e4_customer_value',
@@ -1938,11 +1944,8 @@ app.get('/api/production-orders', async (req, res) => {
       filters.push(`cr7e4_ordernumber eq '${safe}'`);
     }
     if (req.query.status) {
-      filters.push(`cr7e4_orderstatus eq ${parseInt(req.query.status)}`);
-    }
-    if (req.query.press) {
-      const safe = String(req.query.press).replace(/'/g, "''");
-      filters.push(`cr7e4_productionpress eq '${safe}'`);
+      const safe = String(req.query.status).replace(/'/g, "''");
+      filters.push(`cr7e4_productionstatus eq '${safe}'`);
     }
     if (req.query.shift) {
       filters.push(`cr7e4_productionshift eq ${parseInt(req.query.shift)}`);
