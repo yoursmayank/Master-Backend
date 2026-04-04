@@ -1854,6 +1854,20 @@ app.get('/api/debug-foundry-lines-columns', async (req, res) => {
   }
 });
 
+/* DEBUG: list all attributes on production orders entity */
+app.get('/api/debug-production-columns', async (req, res) => {
+  try {
+    const token = await getProductionOrdersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/EntityDefinitions(LogicalName='cr7e4_production_orders')/Attributes?$select=LogicalName,AttributeType&$filter=AttributeType ne 'Virtual'&$orderby=LogicalName`;
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+    });
+    res.json(response.data.value.map(a => ({ name: a.LogicalName, type: a.AttributeType })));
+  } catch (error) {
+    res.status(500).json({ error: 'Debug production columns failed', details: error.response?.data || error.message });
+  }
+});
+
 /* ===========================
    PRODUCTION ORDERS API
    Entity set: cr7e4_production_orderses
