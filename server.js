@@ -834,6 +834,78 @@ app.get('/api/sections-entityset', async (req, res) => {
   }
 });
 
+// POST create a new section
+app.post('/api/sections', async (req, res) => {
+  try {
+    const token = await getSectionAccessToken();
+    if (!sectionEntitySet) {
+      await discoverSectionEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${sectionEntitySet}`;
+    const response = await axios.post(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation'
+      }
+    });
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('[POST /api/sections] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create section', details: error.response?.data || error.message });
+  }
+});
+
+// PATCH update a section
+app.patch('/api/sections/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getSectionAccessToken();
+    if (!sectionEntitySet) {
+      await discoverSectionEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${sectionEntitySet}(${id})`;
+    await axios.patch(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        'If-Match': '*'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[PATCH /api/sections] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to update section', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE a section
+app.delete('/api/sections/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getSectionAccessToken();
+    if (!sectionEntitySet) {
+      await discoverSectionEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${sectionEntitySet}(${id})`;
+    await axios.delete(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[DELETE /api/sections] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete section', details: error.response?.data || error.message });
+  }
+});
+
 /* ===========================
    DIE MASTERS API
 =========================== */
@@ -891,6 +963,78 @@ app.get('/api/dies', async (req, res) => {
   } catch (error) {
     console.error('[GET /api/dies] Error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to fetch dies', details: error.response?.data || error.message });
+  }
+});
+
+// POST create a new die
+app.post('/api/dies', async (req, res) => {
+  try {
+    const token = await getDieAccessToken();
+    if (!dieEntitySet) {
+      await discoverDieEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}`;
+    const response = await axios.post(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation'
+      }
+    });
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('[POST /api/dies] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create die', details: error.response?.data || error.message });
+  }
+});
+
+// PATCH update a die
+app.patch('/api/dies/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getDieAccessToken();
+    if (!dieEntitySet) {
+      await discoverDieEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}(${id})`;
+    await axios.patch(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        'If-Match': '*'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[PATCH /api/dies] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to update die', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE a die
+app.delete('/api/dies/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getDieAccessToken();
+    if (!dieEntitySet) {
+      await discoverDieEntitySet(token);
+    }
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}(${id})`;
+    await axios.delete(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0'
+      }
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[DELETE /api/dies] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete die', details: error.response?.data || error.message });
   }
 });
 
