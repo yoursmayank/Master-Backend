@@ -53,6 +53,10 @@ const FOUNDRY_HEADERS_CLIENT_SECRET = process.env.CLIENT_SECRET_FOUNDRY_HEADERS 
 const FOUNDRY_LINES_CLIENT_ID = process.env.CLIENT_ID_FOUNDRY_LINES || CLIENT_ID;
 const FOUNDRY_LINES_CLIENT_SECRET = process.env.CLIENT_SECRET_FOUNDRY_LINES || CLIENT_SECRET;
 
+// Production Orders credentials
+const PRODUCTION_ORDERS_CLIENT_ID = process.env.CLIENT_ID_PRODUCTIONORDERS || CLIENT_ID;
+const PRODUCTION_ORDERS_CLIENT_SECRET = process.env.CLIENT_SECRET_PRODUCTIONORDERS || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -169,6 +173,20 @@ async function getFoundryLinesAccessToken() {
   params.append('grant_type', 'client_credentials');
   params.append('client_id', FOUNDRY_LINES_CLIENT_ID);
   params.append('client_secret', FOUNDRY_LINES_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getProductionOrdersAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', PRODUCTION_ORDERS_CLIENT_ID);
+  params.append('client_secret', PRODUCTION_ORDERS_CLIENT_SECRET);
   params.append('scope', SCOPE);
 
   const response = await axios.post(tokenUrl, params, {
@@ -1833,6 +1851,196 @@ app.get('/api/debug-foundry-lines-columns', async (req, res) => {
   } catch (error) {
     console.error('[DEBUG foundry-lines-columns] Error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to fetch foundry lines columns', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   PRODUCTION ORDERS API
+   Entity set: cr7e4_production_orderses
+   Key fields:
+     cr7e4_production_ordersid  – primary key
+     cr7e4_ordernumber          – string
+     cr7e4_productiondate       – DateTimeOffset
+     cr7e4_productionshift      – OptionSet (int)
+     cr7e4_productionpress      – string
+     cr7e4_cutlength            – Decimal
+     cr7e4_clunit               – string / OptionSet
+     cr7e4_rangefrom            – Decimal (kg/mm)
+     cr7e4_rangeto              – Decimal (kg/mm)
+     cr7e4_orderstatus          – OptionSet (int)
+     cr7e4_planneddate          – DateTimeOffset
+     cr7e4_duedate              – DateTimeOffset
+     cr7e4_totalweight          – Decimal
+     cr7e4_plnumber             – string
+     _cr7e4_sectionnumber_value – lookup GUID
+     _cr7e4_dienumber_value     – lookup GUID
+     _cr7e4_customer_value      – lookup GUID
+     _cr7e4_productionsupervisor_value – lookup GUID
+     createdon / modifiedon
+=========================== */
+const PRODUCTION_ORDERS_ENTITY = 'cr7e4_production_orderses';
+
+const PRODUCTION_ORDERS_SELECT = [
+  'cr7e4_production_ordersid',
+  'cr7e4_ordernumber',
+  'cr7e4_productiondate',
+  'cr7e4_productionshift',
+  'cr7e4_productionpress',
+  'cr7e4_cutlength',
+  'cr7e4_clunit',
+  'cr7e4_rangefrom',
+  'cr7e4_rangeto',
+  'cr7e4_orderstatus',
+  'cr7e4_planneddate',
+  'cr7e4_duedate',
+  'cr7e4_totalweight',
+  'cr7e4_plnumber',
+  '_cr7e4_sectionnumber_value',
+  '_cr7e4_dienumber_value',
+  '_cr7e4_customer_value',
+  '_cr7e4_productionsupervisor_value',
+  'statecode',
+  'statuscode',
+  'createdon',
+  'modifiedon',
+].join(',');
+
+// GET all production orders
+app.get('/api/production-orders', async (req, res) => {
+  try {
+    const token = await getProductionOrdersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${PRODUCTION_ORDERS_ENTITY}`;
+
+    const queryParams = {
+      $select: PRODUCTION_ORDERS_SELECT,
+      $orderby: 'createdon desc',
+      $count: 'true',
+    };
+
+    // Optional top-level filters forwarded from frontend query string
+    const filters = [];
+    if (req.query.orderNumber) {
+      const safe = String(req.query.orderNumber).replace(/'/g, "''");
+      filters.push(`cr7e4_ordernumber eq '${safe}'`);
+    }
+    if (req.query.status) {
+      filters.push(`cr7e4_orderstatus eq ${parseInt(req.query.status)}`);
+    }
+    if (req.query.press) {
+      const safe = String(req.query.press).replace(/'/g, "''");
+      filters.push(`cr7e4_productionpress eq '${safe}'`);
+    }
+    if (req.query.shift) {
+      filters.push(`cr7e4_productionshift eq ${parseInt(req.query.shift)}`);
+    }
+    if (filters.length > 0) {
+      queryParams.$filter = filters.join(' and ');
+    }
+
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000',
+      },
+      params: queryParams,
+    });
+
+    res.json({
+      data: response.data.value,
+      total: response.data['@odata.count'] || 0,
+    });
+  } catch (error) {
+    console.error('[GET /api/production-orders] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch production orders', details: error.response?.data || error.message });
+  }
+});
+
+// GET single production order by ID
+app.get('/api/production-orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getProductionOrdersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${PRODUCTION_ORDERS_ENTITY}(${id})`;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
+      },
+      params: { $select: PRODUCTION_ORDERS_SELECT },
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('[GET /api/production-orders/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch production order', details: error.response?.data || error.message });
+  }
+});
+
+// POST create a new production order
+app.post('/api/production-orders', async (req, res) => {
+  try {
+    const token = await getProductionOrdersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${PRODUCTION_ORDERS_ENTITY}`;
+    const response = await axios.post(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        Prefer: 'return=representation',
+      },
+    });
+    res.status(201).json(response.data);
+  } catch (error) {
+    console.error('[POST /api/production-orders] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to create production order', details: error.response?.data || error.message });
+  }
+});
+
+// PATCH update a production order
+app.patch('/api/production-orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getProductionOrdersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${PRODUCTION_ORDERS_ENTITY}(${id})`;
+    await axios.patch(url, req.body, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+        'If-Match': '*',
+      },
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[PATCH /api/production-orders/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to update production order', details: error.response?.data || error.message });
+  }
+});
+
+// DELETE a production order
+app.delete('/api/production-orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getProductionOrdersAccessToken();
+    const url = `${DATAVERSE_URL}/api/data/v9.2/${PRODUCTION_ORDERS_ENTITY}(${id})`;
+    await axios.delete(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+      },
+    });
+    res.status(204).send();
+  } catch (error) {
+    console.error('[DELETE /api/production-orders/:id] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to delete production order', details: error.response?.data || error.message });
   }
 });
 
