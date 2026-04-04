@@ -979,9 +979,9 @@ app.post('/api/dies', async (req, res) => {
       await discoverSectionEntitySet(sectionToken);
     }
     const body = { ...req.body };
-    // Transform plain GUID to OData bind navigation property
-    if (body.cr7e4_sectionnumber && !body['cr7e4_sectionnumber@odata.bind']) {
-      body['cr7e4_sectionnumber@odata.bind'] = `/${sectionEntitySet}(${body.cr7e4_sectionnumber})`;
+    // Transform plain GUID to OData bind navigation property (PascalCase nav prop name)
+    if (body.cr7e4_sectionnumber) {
+      body['cr7e4_SectionNumber@odata.bind'] = `/${sectionEntitySet}(${body.cr7e4_sectionnumber})`;
       delete body.cr7e4_sectionnumber;
     }
     const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}`;
@@ -1014,12 +1014,12 @@ app.patch('/api/dies/:id', async (req, res) => {
       await discoverSectionEntitySet(sectionToken);
     }
     const body = { ...req.body };
-    if (body.cr7e4_sectionnumber && !body['cr7e4_sectionnumber@odata.bind']) {
-      body['cr7e4_sectionnumber@odata.bind'] = `/${sectionEntitySet}(${body.cr7e4_sectionnumber})`;
+    if (body.cr7e4_sectionnumber) {
+      body['cr7e4_SectionNumber@odata.bind'] = `/${sectionEntitySet}(${body.cr7e4_sectionnumber})`;
       delete body.cr7e4_sectionnumber;
     }
     const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}(${id})`;
-    await axios.patch(url, req.body, {
+    await axios.patch(url, body, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
