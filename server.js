@@ -973,8 +973,19 @@ app.post('/api/dies', async (req, res) => {
     if (!dieEntitySet) {
       await discoverDieEntitySet(token);
     }
+    // Ensure section entity set is discovered before building the bind URL
+    if (!sectionEntitySet) {
+      const sectionToken = await getSectionAccessToken();
+      await discoverSectionEntitySet(sectionToken);
+    }
+    const body = { ...req.body };
+    // Transform plain GUID to OData bind navigation property
+    if (body.cr7e4_sectionnumber && !body['cr7e4_sectionnumber@odata.bind']) {
+      body['cr7e4_sectionnumber@odata.bind'] = `/${sectionEntitySet}(${body.cr7e4_sectionnumber})`;
+      delete body.cr7e4_sectionnumber;
+    }
     const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}`;
-    const response = await axios.post(url, req.body, {
+    const response = await axios.post(url, body, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -997,6 +1008,15 @@ app.patch('/api/dies/:id', async (req, res) => {
     const token = await getDieAccessToken();
     if (!dieEntitySet) {
       await discoverDieEntitySet(token);
+    }
+    if (!sectionEntitySet) {
+      const sectionToken = await getSectionAccessToken();
+      await discoverSectionEntitySet(sectionToken);
+    }
+    const body = { ...req.body };
+    if (body.cr7e4_sectionnumber && !body['cr7e4_sectionnumber@odata.bind']) {
+      body['cr7e4_sectionnumber@odata.bind'] = `/${sectionEntitySet}(${body.cr7e4_sectionnumber})`;
+      delete body.cr7e4_sectionnumber;
     }
     const url = `${DATAVERSE_URL}/api/data/v9.2/${dieEntitySet}(${id})`;
     await axios.patch(url, req.body, {
