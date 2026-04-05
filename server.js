@@ -1929,6 +1929,7 @@ app.get('/api/production-orders', async (req, res) => {
 
     const queryParams = {
       $select: PRODUCTION_ORDERS_SELECT,
+      $expand: 'cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize)',
       $orderby: 'createdon desc',
       $count: 'true',
     };
