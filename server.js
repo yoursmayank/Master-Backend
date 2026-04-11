@@ -1919,6 +1919,14 @@ const PRODUCTION_ORDERS_SELECT = [
   'statuscode',
   'createdon',
   'modifiedon',
+  'cr7e4_diein',
+  'cr7e4_dieout',
+  'cr7e4_runtime',
+  'cr7e4_billetcount',
+  'cr7e4_billetlength',
+  'cr7e4_input',
+  'cr7e4_weightperpiece',
+  'cr7e4_productionremarks',
 ].join(',');
 
 // GET all production orders
