@@ -57,6 +57,10 @@ const FOUNDRY_LINES_CLIENT_SECRET = process.env.CLIENT_SECRET_FOUNDRY_LINES || C
 const PRODUCTION_ORDERS_CLIENT_ID = process.env.CLIENT_ID_PRODUCTIONORDERS || CLIENT_ID;
 const PRODUCTION_ORDERS_CLIENT_SECRET = process.env.CLIENT_SECRET_PRODUCTIONORDERS || CLIENT_SECRET;
 
+// Breakdown Reports credentials
+const BREAKDOWNS_CLIENT_ID = process.env.CLIENT_ID_BREAKDOWNS || CLIENT_ID;
+const BREAKDOWNS_CLIENT_SECRET = process.env.CLIENT_SECRET_BREAKDOWNS || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -195,6 +199,20 @@ async function getProductionOrdersAccessToken() {
   return response.data.access_token;
 }
 
+async function getBreakdownsAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', BREAKDOWNS_CLIENT_ID);
+  params.append('client_secret', BREAKDOWNS_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Backend running' });
 });
@@ -266,7 +284,7 @@ app.get('/api/packing-entries', async (req, res) => {
       ].join(','),
       // Expand production order → and within it expand section master
       // Expand aging record for tensile strength (hardness)
-      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value,_cr7e4_poid_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize,cr7e4_sectiongroup)),cr7e4_AgingNumber($select=cr7e4_tensilestrength)',
+      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize,cr7e4_sectiongroup)),cr7e4_AgingNumber($select=cr7e4_tensilestrength)',
       $orderby: 'createdon desc',
       $count: 'true'
     };
@@ -2063,6 +2081,71 @@ app.delete('/api/production-orders/:id', async (req, res) => {
   } catch (error) {
     console.error('[DELETE /api/production-orders/:id] Error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to delete production order', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   BREAKDOWN REPORTS API
+   Entity: cr7e4_breakdown_reports
+=========================== */
+const BREAKDOWN_REPORTS_ENTITY = 'cr7e4_breakdown_reports';
+
+app.get('/api/breakdown-reports', async (req, res) => {
+  try {
+    const token = await getBreakdownsAccessToken();
+    const queryParams = {
+      $orderby: 'createdon desc',
+      $count: 'true',
+    };
+    if (req.query.top) queryParams.$top = parseInt(req.query.top, 10);
+    if (req.query.filter) queryParams.$filter = req.query.filter;
+
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/${BREAKDOWN_REPORTS_ENTITY}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000',
+        },
+        params: queryParams,
+      }
+    );
+    res.json({
+      data: response.data.value,
+      total: response.data['@odata.count'] || 0,
+    });
+  } catch (error) {
+    console.error('[GET /api/breakdown-reports] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch breakdown reports', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: Discover all columns on cr7e4_breakdown_reports
+app.get('/api/debug-breakdown-columns', async (req, res) => {
+  try {
+    const token = await getBreakdownsAccessToken();
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/${BREAKDOWN_REPORTS_ENTITY}?$top=1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
+        },
+      }
+    );
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in cr7e4_breakdown_reports' });
+    const columns = Object.keys(record).sort();
+    res.json({ totalColumns: columns.length, columns, sampleRecord: record });
+  } catch (error) {
+    console.error('[DEBUG breakdown-columns] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch breakdown columns', details: error.response?.data || error.message });
   }
 });
 
