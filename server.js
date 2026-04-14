@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const compression = require('compression');
 const axios = require('axios');
 const cors = require('cors');
@@ -1966,6 +1966,7 @@ const PRODUCTION_ORDERS_SELECT = [
   'cr7e4_completedpcs',
   'cr7e4_productionquantity',
   '_cr7e4_sectionnumber_value',
+  '_cr7e4_poid_value',
   '_cr7e4_dienumber_value',
   '_cr7e4_customer_value',
   '_cr7e4_productionsupervisor_value',
@@ -1991,7 +1992,6 @@ app.get('/api/production-orders', async (req, res) => {
 
     const queryParams = {
       $select: PRODUCTION_ORDERS_SELECT,
-      $expand: 'cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize)',
       $orderby: 'createdon desc',
       $count: 'true',
     };
@@ -2256,7 +2256,7 @@ app.get('/api/aging-records/:id/lines', async (req, res) => {
               $filter: filterExpr,
               $orderby: 'createdon asc',
               $count: 'true',
-              $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_cutlength,cr7e4_clunit,_cr7e4_sectionnumber_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))',
+              $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_cutlength,cr7e4_clunit,_cr7e4_sectionnumber_value,_cr7e4_customer_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))',
             },
           }
         );
