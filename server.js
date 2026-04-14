@@ -1575,6 +1575,138 @@ app.post('/api/orders-lines', async (req, res) => {
 });
 
 // POST batch create order lines (for bulk order submission)
+// PUT upsert order lines ? PATCH lines with an existing id, POST new ones (no deletes, preserves POID)
+app.put('/api/orders-lines/batch-upsert', async (req, res) => {
+  try {
+    const { lines } = req.body;
+    if (!lines || !Array.isArray(lines) || lines.length === 0) {
+      return res.status(400).json({ error: 'lines array is required' });
+    }
+    const token = await getOrdersLinesAccessToken();
+    const baseUrl = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+
+    // Split into updates (have id) and creates (no id)
+    const toUpdate = lines.filter(l => l.id);
+    const toCreate = lines.filter(l => !l.id);
+
+    // Also collect IDs that are present in the upsert ? lines missing from this list should be deleted
+    const incomingIds = new Set(toUpdate.map(l => l.id));
+    const headerId = lines[0]?.headerId || null;
+
+    // Delete lines that exist in Dataverse but are NOT in the incoming list
+    if (headerId) {
+      try {
+        const listRes = await axios.get(baseUrl, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' },
+          params: { $select: 'cr7e4_ordersid', $filter: `_cr7e4_ordernumberl_value eq ${headerId}` }
+        });
+        const existing = listRes.data.value || [];
+        const toDelete = existing.filter(e => !incomingIds.has(e.cr7e4_ordersid));
+        await Promise.allSettled(toDelete.map(e =>
+          axios.delete(`${baseUrl}(${e.cr7e4_ordersid})`, {
+            headers: { Authorization: `Bearer ${token}`, 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+          })
+        ));
+      } catch (e) { console.warn('[batch-upsert] delete-stale failed:', e.message); }
+    }
+
+    // PATCH existing lines
+    const updateResults = await Promise.allSettled(
+      toUpdate.map(async l => {
+        const { id, ...rest } = l;
+        const body = await buildOrderLineBody(rest, token);
+        await axios.patch(`${baseUrl}(${id})`, body, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0', 'If-Match': '*' }
+        });
+        return id;
+      })
+    );
+
+    // POST new lines
+    const builtNew = await Promise.all(toCreate.map(l => buildOrderLineBody(l, token)));
+    const createResults = await Promise.allSettled(
+      builtNew.map(line =>
+        axios.post(baseUrl, line, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0', Prefer: 'return=representation' }
+        })
+      )
+    );
+
+    const successCount = updateResults.filter(r => r.status === 'fulfilled').length + createResults.filter(r => r.status === 'fulfilled').length;
+    const failedCount  = updateResults.filter(r => r.status === 'rejected').length  + createResults.filter(r => r.status === 'rejected').length;
+    res.json({ success: successCount, failed: failedCount });
+  } catch (error) {
+    console.error('[PUT /api/orders-lines/batch-upsert] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Batch upsert failed', details: error.response?.data || error.message });
+  }
+});
+
+// PUT upsert order lines ? PATCH lines with an existing id, POST new ones (no deletes, preserves POID)
+app.put('/api/orders-lines/batch-upsert', async (req, res) => {
+  try {
+    const { lines } = req.body;
+    if (!lines || !Array.isArray(lines) || lines.length === 0) {
+      return res.status(400).json({ error: 'lines array is required' });
+    }
+    const token = await getOrdersLinesAccessToken();
+    const baseUrl = `${DATAVERSE_URL}/api/data/v9.2/cr7e4_orderses`;
+
+    // Split into updates (have id) and creates (no id)
+    const toUpdate = lines.filter(l => l.id);
+    const toCreate = lines.filter(l => !l.id);
+
+    // Also collect IDs that are present in the upsert ? lines missing from this list should be deleted
+    const incomingIds = new Set(toUpdate.map(l => l.id));
+    const headerId = lines[0]?.headerId || null;
+
+    // Delete lines that exist in Dataverse but are NOT in the incoming list
+    if (headerId) {
+      try {
+        const listRes = await axios.get(baseUrl, {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' },
+          params: { $select: 'cr7e4_ordersid', $filter: `_cr7e4_ordernumberl_value eq ${headerId}` }
+        });
+        const existing = listRes.data.value || [];
+        const toDelete = existing.filter(e => !incomingIds.has(e.cr7e4_ordersid));
+        await Promise.allSettled(toDelete.map(e =>
+          axios.delete(`${baseUrl}(${e.cr7e4_ordersid})`, {
+            headers: { Authorization: `Bearer ${token}`, 'OData-MaxVersion': '4.0', 'OData-Version': '4.0' }
+          })
+        ));
+      } catch (e) { console.warn('[batch-upsert] delete-stale failed:', e.message); }
+    }
+
+    // PATCH existing lines
+    const updateResults = await Promise.allSettled(
+      toUpdate.map(async l => {
+        const { id, ...rest } = l;
+        const body = await buildOrderLineBody(rest, token);
+        await axios.patch(`${baseUrl}(${id})`, body, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0', 'If-Match': '*' }
+        });
+        return id;
+      })
+    );
+
+    // POST new lines
+    const builtNew = await Promise.all(toCreate.map(l => buildOrderLineBody(l, token)));
+    const createResults = await Promise.allSettled(
+      builtNew.map(line =>
+        axios.post(baseUrl, line, {
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'OData-MaxVersion': '4.0', 'OData-Version': '4.0', Prefer: 'return=representation' }
+        })
+      )
+    );
+
+    const successCount = updateResults.filter(r => r.status === 'fulfilled').length + createResults.filter(r => r.status === 'fulfilled').length;
+    const failedCount  = updateResults.filter(r => r.status === 'rejected').length  + createResults.filter(r => r.status === 'rejected').length;
+    res.json({ success: successCount, failed: failedCount });
+  } catch (error) {
+    console.error('[PUT /api/orders-lines/batch-upsert] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Batch upsert failed', details: error.response?.data || error.message });
+  }
+});
+
 app.post('/api/orders-lines/batch', async (req, res) => {
   try {
     const { lines } = req.body;
