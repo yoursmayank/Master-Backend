@@ -1957,8 +1957,6 @@ const PRODUCTION_ORDERS_SELECT = [
   'cr7e4_dispatchdate',
   'cr7e4_productionshift',
   'cr7e4_productionpress',
-  'cr7e4_cutlength',
-  'cr7e4_clunit',
   'cr7e4_rangefrom',
   'cr7e4_rangeto',
   'cr7e4_productionstatus',
@@ -1992,7 +1990,7 @@ app.get('/api/production-orders', async (req, res) => {
 
     const queryParams = {
       $select: PRODUCTION_ORDERS_SELECT,
-      $expand: "cr7e4_POID($select=_cr7e4_sectionnumber_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))",
+      $expand: "cr7e4_POID($select=_cr7e4_sectionnumber_value,cr7e4_cutlength,cr7e4_clunit;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))",
       $orderby: 'createdon desc',
       $count: 'true',
     };
