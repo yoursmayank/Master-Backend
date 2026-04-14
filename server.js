@@ -2252,7 +2252,12 @@ app.get('/api/aging-records/:id/lines', async (req, res) => {
               'OData-Version': '4.0',
               Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000',
             },
-            params: { $filter: filterExpr, $orderby: 'createdon asc', $count: 'true' },
+            params: {
+              $filter: filterExpr,
+              $orderby: 'createdon asc',
+              $count: 'true',
+              $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_cutlength,cr7e4_clunit,_cr7e4_sectionnumber_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))',
+            },
           }
         );
         data = response.data.value || [];
