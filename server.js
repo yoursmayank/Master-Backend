@@ -61,6 +61,14 @@ const PRODUCTION_ORDERS_CLIENT_SECRET = process.env.CLIENT_SECRET_PRODUCTIONORDE
 const BREAKDOWNS_CLIENT_ID = process.env.CLIENT_ID_BREAKDOWNS || CLIENT_ID;
 const BREAKDOWNS_CLIENT_SECRET = process.env.CLIENT_SECRET_BREAKDOWNS || CLIENT_SECRET;
 
+// Aging Records Header credentials
+const AGING_HEADER_CLIENT_ID = process.env.CLIENT_ID_AGINGHEADER || CLIENT_ID;
+const AGING_HEADER_CLIENT_SECRET = process.env.CLIENT_SECRET_AGINGHEADER || CLIENT_SECRET;
+
+// Aging Records Lines credentials
+const AGING_LINE_CLIENT_ID = process.env.CLIENT_ID_AGINGLINE || CLIENT_ID;
+const AGING_LINE_CLIENT_SECRET = process.env.CLIENT_SECRET_AGINGLINE || CLIENT_SECRET;
+
 // Your table
 const ENTITY_NAME = 'cr7e4_inventory_records';
 
@@ -205,6 +213,34 @@ async function getBreakdownsAccessToken() {
   params.append('grant_type', 'client_credentials');
   params.append('client_id', BREAKDOWNS_CLIENT_ID);
   params.append('client_secret', BREAKDOWNS_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getAgingHeaderAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', AGING_HEADER_CLIENT_ID);
+  params.append('client_secret', AGING_HEADER_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+async function getAgingLineAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', AGING_LINE_CLIENT_ID);
+  params.append('client_secret', AGING_LINE_CLIENT_SECRET);
   params.append('scope', SCOPE);
 
   const response = await axios.post(tokenUrl, params, {
@@ -2146,6 +2182,145 @@ app.get('/api/debug-breakdown-columns', async (req, res) => {
   } catch (error) {
     console.error('[DEBUG breakdown-columns] Error:', error.response?.data || error.message);
     res.status(500).json({ error: 'Failed to fetch breakdown columns', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   AGING RECORDS API
+   Headers: cr7e4_aging_records
+   Lines:   cr7e4_aging_records_lineses
+=========================== */
+const AGING_HEADERS_ENTITY = 'cr7e4_aging_recordses';
+const AGING_LINES_ENTITY   = 'cr7e4_aging_records_lineses';
+
+// GET all aging headers — newest first
+app.get('/api/aging-records', async (req, res) => {
+  try {
+    const token = await getAgingHeaderAccessToken();
+    const queryParams = {
+      $orderby: 'createdon desc',
+      $count: 'true',
+    };
+    if (req.query.top) queryParams.$top = parseInt(req.query.top, 10);
+    if (req.query.filter) queryParams.$filter = req.query.filter;
+
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/${AGING_HEADERS_ENTITY}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000',
+        },
+        params: queryParams,
+      }
+    );
+    res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
+  } catch (error) {
+    console.error('[GET /api/aging-records] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch aging records', details: error.response?.data || error.message });
+  }
+});
+
+// GET lines for a specific aging header ID
+app.get('/api/aging-records/:id/lines', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = await getAgingLineAccessToken();
+
+    // Try the most common lookup field name patterns for the parent header
+    const filterCandidates = [
+      `_cr7e4_agingnumber_value eq ${id}`,
+      `_cr7e4_aging_record_value eq ${id}`,
+      `_cr7e4_header_value eq ${id}`,
+      `_cr7e4_agingid_value eq ${id}`,
+    ];
+
+    let data = [];
+    let lastError = null;
+    for (const filterExpr of filterCandidates) {
+      try {
+        const response = await axios.get(
+          `${DATAVERSE_URL}/api/data/v9.2/${AGING_LINES_ENTITY}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/json',
+              'OData-MaxVersion': '4.0',
+              'OData-Version': '4.0',
+              Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=5000',
+            },
+            params: { $filter: filterExpr, $orderby: 'createdon asc', $count: 'true' },
+          }
+        );
+        data = response.data.value || [];
+        if (data.length > 0) break; // found with this filter
+        // Even if 0 results, treat as success and stop trying
+        break;
+      } catch (e) {
+        lastError = e;
+        // try next candidate
+      }
+    }
+
+    if (data.length === 0 && lastError) {
+      throw lastError;
+    }
+
+    res.json({ data, total: data.length });
+  } catch (error) {
+    console.error('[GET /api/aging-records/:id/lines] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch aging lines', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: columns on aging headers
+app.get('/api/debug-aging-header-columns', async (req, res) => {
+  try {
+    const token = await getAgingHeaderAccessToken();
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/${AGING_HEADERS_ENTITY}?$top=1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
+        },
+      }
+    );
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in aging headers' });
+    res.json({ totalColumns: Object.keys(record).length, columns: Object.keys(record).sort(), sampleRecord: record });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch aging header columns', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: columns on aging lines
+app.get('/api/debug-aging-line-columns', async (req, res) => {
+  try {
+    const token = await getAgingLineAccessToken();
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/${AGING_LINES_ENTITY}?$top=1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
+        },
+      }
+    );
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in aging lines' });
+    res.json({ totalColumns: Object.keys(record).length, columns: Object.keys(record).sort(), sampleRecord: record });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch aging line columns', details: error.response?.data || error.message });
   }
 });
 
