@@ -1963,7 +1963,6 @@ const PRODUCTION_ORDERS_SELECT = [
   'cr7e4_completedkgs',
   'cr7e4_completedpcs',
   'cr7e4_productionquantity',
-  '_cr7e4_sectionnumber_value',
   '_cr7e4_poid_value',
   '_cr7e4_dienumber_value',
   '_cr7e4_customer_value',
