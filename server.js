@@ -2088,7 +2088,7 @@ app.delete('/api/production-orders/:id', async (req, res) => {
    BREAKDOWN REPORTS API
    Entity: cr7e4_breakdown_reports
 =========================== */
-const BREAKDOWN_REPORTS_ENTITY = 'cr7e4_breakdown_reports';
+const BREAKDOWN_REPORTS_ENTITY = 'cr7e4_breakdown_reportses';
 
 app.get('/api/breakdown-reports', async (req, res) => {
   try {
