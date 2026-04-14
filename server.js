@@ -1992,6 +1992,7 @@ app.get('/api/production-orders', async (req, res) => {
 
     const queryParams = {
       $select: PRODUCTION_ORDERS_SELECT,
+      $expand: "cr7e4_POID($select=_cr7e4_sectionnumber_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))",
       $orderby: 'createdon desc',
       $count: 'true',
     };
