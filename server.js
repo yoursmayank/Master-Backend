@@ -320,7 +320,7 @@ app.get('/api/packing-entries', async (req, res) => {
       ].join(','),
       // Expand production order → and within it expand section master
       // Expand aging record for tensile strength (hardness)
-      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,cr7e4_cutlength,cr7e4_clunit,cr7e4_rangefrom,cr7e4_rangeto,_cr7e4_sectionnumber_value,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize,cr7e4_sectiongroup)),cr7e4_AgingNumber($select=cr7e4_tensilestrength)',
+      $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_productiondate,cr7e4_productionshift,cr7e4_productionpress,_cr7e4_dienumber_value,_cr7e4_customer_value,_cr7e4_productionsupervisor_value;$expand=cr7e4_POID($select=cr7e4_cutlength,cr7e4_clunit,cr7e4_wtrangefromc,cr7e4_wtrangetoc;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize,cr7e4_sectiongroup))),cr7e4_AgingNumber($select=cr7e4_tensilestrength)',
       $orderby: 'createdon desc',
       $count: 'true'
     };
@@ -2384,7 +2384,7 @@ app.get('/api/aging-records/:id/lines', async (req, res) => {
               $filter: filterExpr,
               $orderby: 'createdon asc',
               $count: 'true',
-              $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,cr7e4_cutlength,cr7e4_clunit,_cr7e4_sectionnumber_value,_cr7e4_customer_value;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize))',
+              $expand: 'cr7e4_OrderNumber($select=cr7e4_ordernumber,_cr7e4_customer_value;$expand=cr7e4_POID($select=cr7e4_cutlength,cr7e4_clunit;$expand=cr7e4_SectionNumber($select=cr7e4_sectionnumber,cr7e4_sectionname,cr7e4_sectionsize)))',
             },
           }
         );
