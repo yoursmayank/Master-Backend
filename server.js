@@ -716,7 +716,7 @@ app.post('/api/packing-entries/batch-hold', async (req, res) => {
 =========================== */
 app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
   try {
-    const { ids, dispatchTo, dispatchDate, category } = req.body;
+    const { ids, dispatchTo, dispatchDate, category, lineIdMap } = req.body;
 
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'ids array is required' });
@@ -724,21 +724,23 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
 
     const token = await getAccessToken();
 
-    const updateData = {};
-    updateData.cr7e4_status = 285960001;       // DISPATCHED
-    updateData.cr7e4_holdstatus = 285960002;   // N/A
+    const baseData = {};
+    baseData.cr7e4_status = 285960001;       // DISPATCHED
+    baseData.cr7e4_holdstatus = 285960002;   // N/A
 
-    if (dispatchDate) updateData.cr7e4_dispatchdate = dispatchDate;
-    if (category !== undefined) updateData.cr7e4_category = category;
+    if (dispatchDate) baseData.cr7e4_dispatchdate = dispatchDate;
+    if (category !== undefined) baseData.cr7e4_category = category;
 
     if (dispatchTo) {
       const custGuid = await resolveCustomerGuid(dispatchTo);
       if (custGuid) {
-        updateData["cr7e4_DispatchedTo@odata.bind"] = `/cr7e4_customers(${custGuid})`;
+        baseData["cr7e4_DispatchedTo@odata.bind"] = `/cr7e4_customers(${custGuid})`;
       }
     }
 
-    const jsonBody = JSON.stringify(updateData);
+    // lineIdMap: { [srn]: ordersLineGuid } — sets the DispatchItemID lookup per item
+    const hasLineMap = lineIdMap && typeof lineIdMap === 'object' && Object.keys(lineIdMap).length > 0;
+
     const BATCH_LIMIT = 1000; // Dataverse max per $batch
     const allFailed = [];
     let totalSuccess = 0;
@@ -755,6 +757,13 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       batchBody += `Content-Type: multipart/mixed; boundary=${changesetId}\r\n\r\n`;
 
       chunk.forEach((id, idx) => {
+        // Build per-item payload — include DispatchItemID lookup if available
+        const itemData = { ...baseData };
+        if (hasLineMap && lineIdMap[id]) {
+          itemData["cr7e4_DispatchItemID@odata.bind"] = `/cr7e4_orderses(${lineIdMap[id]})`;
+        }
+        const itemBody = JSON.stringify(itemData);
+
         batchBody += `--${changesetId}\r\n`;
         batchBody += `Content-Type: application/http\r\n`;
         batchBody += `Content-Transfer-Encoding: binary\r\n`;
@@ -762,7 +771,7 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
         batchBody += `PATCH ${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id}) HTTP/1.1\r\n`;
         batchBody += `Content-Type: application/json\r\n`;
         batchBody += `If-Match: *\r\n\r\n`;
-        batchBody += `${jsonBody}\r\n`;
+        batchBody += `${itemBody}\r\n`;
       });
 
       batchBody += `--${changesetId}--\r\n`;
@@ -793,10 +802,14 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
         if (hasError) {
           // Changeset failed — fall back to individual PATCHes for this chunk
           const fallbackResults = await Promise.allSettled(
-            chunk.map(id =>
-              axios.patch(
+            chunk.map(id => {
+              const itemData = { ...baseData };
+              if (hasLineMap && lineIdMap[id]) {
+                itemData["cr7e4_DispatchItemID@odata.bind"] = `/cr7e4_orderses(${lineIdMap[id]})`;
+              }
+              return axios.patch(
                 `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
-                updateData,
+                itemData,
                 {
                   headers: {
                     Authorization: `Bearer ${token}`,
@@ -806,8 +819,8 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
                     'If-Match': '*'
                   }
                 }
-              )
-            )
+              );
+            })
           );
           fallbackResults.forEach((r, i) => {
             if (r.status === 'rejected') {
@@ -822,10 +835,14 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       } catch (batchErr) {
         // $batch request itself failed — fall back to individual PATCHes
         const fallbackResults = await Promise.allSettled(
-          chunk.map(id =>
-            axios.patch(
+          chunk.map(id => {
+            const itemData = { ...baseData };
+            if (hasLineMap && lineIdMap[id]) {
+              itemData["cr7e4_DispatchItemID@odata.bind"] = `/cr7e4_orderses(${lineIdMap[id]})`;
+            }
+            return axios.patch(
               `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
-              updateData,
+              itemData,
               {
                 headers: {
                   Authorization: `Bearer ${token}`,
