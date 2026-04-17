@@ -717,13 +717,13 @@ app.get('/api/packing-entries/dispatched-by-prod-orders', async (req, res) => {
         const kg  = Number(rec.cr7e4_bundleweight) || 0;
         // Customer display name from formatted value annotation
         const customerName = rec['_cr7e4_dispatchedto_value@OData.Community.Display.V1.FormattedValue']
-          || String(rec._cr7e4_dispatchedto_value || '');
-        if (!result[prodOrderId]) result[prodOrderId] = { pcs: 0, kg: 0, customers: [] };
+          || String(rec._cr7e4_dispatchedto_value || '') || 'Unknown';
+        if (!result[prodOrderId]) result[prodOrderId] = { pcs: 0, kg: 0, byCustomer: {} };
         result[prodOrderId].pcs += pcs;
         result[prodOrderId].kg  += kg;
-        if (customerName && !result[prodOrderId].customers.includes(customerName)) {
-          result[prodOrderId].customers.push(customerName);
-        }
+        if (!result[prodOrderId].byCustomer[customerName]) result[prodOrderId].byCustomer[customerName] = { pcs: 0, kg: 0 };
+        result[prodOrderId].byCustomer[customerName].pcs += pcs;
+        result[prodOrderId].byCustomer[customerName].kg  += kg;
       }
     }
 
