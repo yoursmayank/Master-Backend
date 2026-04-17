@@ -24,6 +24,9 @@ const CLIENT_SECRET = process.env.CLIENT_SECRET;
 
 const DATAVERSE_URL = process.env.ORG_URL;
 
+// Packing entries entity logical name (Dataverse entity set)
+const ENTITY_NAME = process.env.PACKING_ENTITY || 'cr7e4_inventory_records';
+
 // Customer table credentials
 const CUSTOMER_TENANT_ID = process.env.TENANT_ID_CUSTOMERS || TENANT_ID;
 const CUSTOMER_CLIENT_ID = process.env.CLIEND_ID_CUSTOMERS || CLIENT_ID;
