@@ -738,8 +738,12 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       }
     }
 
-    // lineIdMap: { [srn]: ordersLineGuid } — sets the DispatchItemID lookup per item
+    // lineIdMap: { [srn]: ordersLineGuid } — used in Step 2 to patch DispatchItemID lookup
     const hasLineMap = lineIdMap && typeof lineIdMap === 'object' && Object.keys(lineIdMap).length > 0;
+    console.log(`[batch-dispatch] ids=${ids.length}, hasLineMap=${hasLineMap}, mapKeys=${hasLineMap ? Object.keys(lineIdMap).length : 0}`);
+    if (hasLineMap && ids.length > 0) {
+      console.log(`[batch-dispatch] sample: id="${ids[0]}" -> lineId="${lineIdMap[ids[0]]}"`); 
+    }
 
     const BATCH_LIMIT = 1000; // Dataverse max per $batch
     const allFailed = [];
@@ -757,12 +761,8 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       batchBody += `Content-Type: multipart/mixed; boundary=${changesetId}\r\n\r\n`;
 
       chunk.forEach((id, idx) => {
-        // Build per-item payload — include DispatchItemID lookup if available
-        const itemData = { ...baseData };
-        if (hasLineMap && lineIdMap[id]) {
-          itemData["cr7e4_DispatchItemID@odata.bind"] = `/cr7e4_orderses(${lineIdMap[id]})`;
-        }
-        const itemBody = JSON.stringify(itemData);
+        // Base fields only — DispatchItemID is patched separately in Step 2
+        const itemBody = JSON.stringify(baseData);
 
         batchBody += `--${changesetId}\r\n`;
         batchBody += `Content-Type: application/http\r\n`;
@@ -802,25 +802,19 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
         if (hasError) {
           // Changeset failed — fall back to individual PATCHes for this chunk
           const fallbackResults = await Promise.allSettled(
-            chunk.map(id => {
-              const itemData = { ...baseData };
-              if (hasLineMap && lineIdMap[id]) {
-                itemData["cr7e4_DispatchItemID@odata.bind"] = `/cr7e4_orderses(${lineIdMap[id]})`;
-              }
-              return axios.patch(
-                `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
-                itemData,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    'OData-MaxVersion': '4.0',
-                    'OData-Version': '4.0',
-                    'If-Match': '*'
-                  }
+            chunk.map(id => axios.patch(
+              `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
+              baseData,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                  'OData-MaxVersion': '4.0',
+                  'OData-Version': '4.0',
+                  'If-Match': '*'
                 }
-              );
-            })
+              }
+            ))
           );
           fallbackResults.forEach((r, i) => {
             if (r.status === 'rejected') {
@@ -835,25 +829,19 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       } catch (batchErr) {
         // $batch request itself failed — fall back to individual PATCHes
         const fallbackResults = await Promise.allSettled(
-          chunk.map(id => {
-            const itemData = { ...baseData };
-            if (hasLineMap && lineIdMap[id]) {
-              itemData["cr7e4_DispatchItemID@odata.bind"] = `/cr7e4_orderses(${lineIdMap[id]})`;
-            }
-            return axios.patch(
-              `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
-              itemData,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                  'OData-MaxVersion': '4.0',
-                  'OData-Version': '4.0',
-                  'If-Match': '*'
-                }
+          chunk.map(id => axios.patch(
+            `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
+            baseData,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'If-Match': '*'
               }
-            )
-          )
+            }
+          ))
         );
         fallbackResults.forEach((r, i) => {
           if (r.status === 'rejected') {
@@ -865,10 +853,49 @@ app.post('/api/packing-entries/batch-dispatch', async (req, res) => {
       }
     }
 
+    // --- STEP 2: Patch DispatchItemID lookup separately (individual PATCHes) ---
+    // Kept separate from the $batch so the dispatch never fails due to lookup errors.
+    let lookupPatched = 0;
+    const lookupErrors = [];
+    if (hasLineMap) {
+      const mappedIds = ids.filter(id => lineIdMap[id]);
+      console.log(`[batch-dispatch] patching DispatchItemID for ${mappedIds.length} items`);
+      const lookupResults = await Promise.allSettled(
+        mappedIds.map(id =>
+          axios.patch(
+            `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}(${id})`,
+            { "cr7e4_DispatchItemID@odata.bind": `/cr7e4_orderses(${lineIdMap[id]})` },
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'If-Match': '*',
+                Prefer: 'return=minimal',
+              }
+            }
+          )
+        )
+      );
+      lookupResults.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const errMsg = r.reason?.response?.data?.error?.message || r.reason?.message || 'unknown';
+          lookupErrors.push(errMsg);
+          if (i === 0) console.error(`[batch-dispatch] DispatchItemID error sample:`, errMsg, `| id=${mappedIds[i]} | guid=${lineIdMap[mappedIds[i]]}`);
+        } else {
+          lookupPatched++;
+        }
+      });
+      console.log(`[batch-dispatch] DispatchItemID done: ${lookupPatched} ok, ${lookupErrors.length} errors`);
+    }
+
     res.json({
       success: totalSuccess,
       failed: allFailed.length,
-      errors: allFailed
+      errors: allFailed,
+      lookupPatched,
+      lookupErrors: lookupErrors.slice(0, 5),
     });
   } catch (error) {
     res.status(500).json({ error: 'Batch dispatch update failed', details: error.response?.data || error.message });
