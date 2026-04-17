@@ -323,6 +323,7 @@ app.get('/api/packing-entries', async (req, res) => {
         'cr7e4_category',
         'cr7e4_cutlength',
         'cr7e4_clunit',
+        '_cr7e4_dispatchitemid_value',
         'createdon',
         'modifiedon',
         'statecode',
