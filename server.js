@@ -2152,6 +2152,12 @@ app.get('/api/production-orders', async (req, res) => {
 
     // Optional top-level filters forwarded from frontend query string
     const filters = [];
+    const { from, to } = req.query;
+    const toOdataDateTime = (ymd, endOfDay) => {
+      if (!ymd) return null;
+      if (String(ymd).includes('T')) return ymd;
+      return `${ymd}T${endOfDay ? '23:59:59Z' : '00:00:00Z'}`;
+    };
     if (req.query.orderNumber) {
       const safe = String(req.query.orderNumber).replace(/'/g, "''");
       filters.push(`cr7e4_ordernumber eq '${safe}'`);
@@ -2162,6 +2168,12 @@ app.get('/api/production-orders', async (req, res) => {
     }
     if (req.query.shift) {
       filters.push(`cr7e4_productionshift eq ${parseInt(req.query.shift)}`);
+    }
+    if (from || to) {
+      const fromIso = toOdataDateTime(from, false);
+      const toIso = toOdataDateTime(to, true);
+      if (fromIso) filters.push(`cr7e4_productiondate ge ${fromIso}`);
+      if (toIso) filters.push(`cr7e4_productiondate le ${toIso}`);
     }
     if (filters.length > 0) {
       queryParams.$filter = filters.join(' and ');
