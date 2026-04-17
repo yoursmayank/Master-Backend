@@ -669,6 +669,69 @@ app.get('/api/packing-entries/dispatched-by-lines', async (req, res) => {
 });
 
 /* ===========================
+   DISPATCHED QTY BY PRODUCTION ORDER IDS
+   GET /api/packing-entries/dispatched-by-prod-orders?prodOrderIds=guid1,guid2,...
+   Returns { [prodOrderId]: { pcs: number, kg: number, customers: string[] } }
+   — finds inventory records linked to those production orders that were dispatched
+=========================== */
+app.get('/api/packing-entries/dispatched-by-prod-orders', async (req, res) => {
+  try {
+    const raw = (req.query.prodOrderIds || '').trim();
+    if (!raw) return res.json({});
+
+    const prodOrderIds = raw.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[0-9a-f-]{36}$/.test(s));
+    if (prodOrderIds.length === 0) return res.json({});
+
+    const token = await getAccessToken();
+    const result = {};
+
+    // Process in chunks of 10 to stay within Dataverse URL limits
+    const CHUNK = 10;
+    for (let i = 0; i < prodOrderIds.length; i += CHUNK) {
+      const chunk = prodOrderIds.slice(i, i + CHUNK);
+      const filterParts = chunk.map(id => `_cr7e4_ordernumber_value eq ${id}`);
+      const filter = `(${filterParts.join(' or ')}) and cr7e4_status eq 314870001`;
+      const url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}`;
+      const response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
+        },
+        params: {
+          $select: 'cr7e4_pcs,cr7e4_bundleweight,_cr7e4_ordernumber_value,_cr7e4_dispatchedto_value',
+          $filter: filter,
+          $top: 5000,
+        }
+      });
+      const records = response.data.value || [];
+      for (const rec of records) {
+        const prodOrderId = String(rec._cr7e4_ordernumber_value || '').toLowerCase();
+        if (!prodOrderId) continue;
+        const pcs = Number(rec.cr7e4_pcs) || 0;
+        const kg  = Number(rec.cr7e4_bundleweight) || 0;
+        // Customer display name from formatted value annotation
+        const customerName = rec['_cr7e4_dispatchedto_value@OData.Community.Display.V1.FormattedValue']
+          || String(rec._cr7e4_dispatchedto_value || '');
+        if (!result[prodOrderId]) result[prodOrderId] = { pcs: 0, kg: 0, customers: [] };
+        result[prodOrderId].pcs += pcs;
+        result[prodOrderId].kg  += kg;
+        if (customerName && !result[prodOrderId].customers.includes(customerName)) {
+          result[prodOrderId].customers.push(customerName);
+        }
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('[dispatched-by-prod-orders]', error.response?.data || error.message);
+    res.status(500).json({ error: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
    DEBUG: NAV PROPS ON INVENTORY RECORDS TABLE
    Call after deploy: GET /api/debug-navprops
 =========================== */
