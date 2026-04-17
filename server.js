@@ -293,6 +293,10 @@ app.get('/api/packing-entries', async (req, res) => {
     const skiptokenFromQuery = req.query.nextLink || req.query.skiptoken || null;
     const pagingCookie = req.query.pagingCookie || null;
     const newerThan = req.query.newerThan || null;
+    const from = req.query.from || null;
+    const to = req.query.to || null;
+    const pageSizeRaw = parseInt(req.query.pageSize, 10);
+    const pageSize = Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.min(pageSizeRaw, 5000) : 5000;
 
     const queryParams = {
       $select: [
@@ -328,8 +332,24 @@ app.get('/api/packing-entries', async (req, res) => {
       $count: 'true'
     };
 
+    const addFilter = (expr) => {
+      if (!expr) return;
+      queryParams.$filter = queryParams.$filter ? `(${queryParams.$filter}) and (${expr})` : expr;
+    };
+    const toOdataDateTime = (ymd, endOfDay) => {
+      if (!ymd) return null;
+      if (String(ymd).includes('T')) return ymd;
+      return `${ymd}T${endOfDay ? '23:59:59Z' : '00:00:00Z'}`;
+    };
+
     if (newerThan) {
-      queryParams.$filter = `createdon gt ${newerThan}`;
+      addFilter(`createdon gt ${newerThan}`);
+    }
+    if (from || to) {
+      const fromIso = toOdataDateTime(from, false);
+      const toIso = toOdataDateTime(to, true);
+      if (fromIso) addFilter(`cr7e4_packingdate ge ${fromIso}`);
+      if (toIso) addFilter(`cr7e4_packingdate le ${toIso}`);
     }
     if (skiptokenFromQuery) {
       queryParams.$skiptoken = skiptokenFromQuery;
@@ -345,7 +365,7 @@ app.get('/api/packing-entries', async (req, res) => {
         Accept: 'application/json',
         'OData-MaxVersion': '4.0',
         'OData-Version': '4.0',
-        Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
+        Prefer: `odata.maxpagesize=${pageSize}, odata.include-annotations="OData.Community.Display.V1.FormattedValue"`
       },
       params: queryParams
     });
