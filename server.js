@@ -690,7 +690,8 @@ app.get('/api/packing-entries/dispatched-by-prod-orders', async (req, res) => {
     for (let i = 0; i < prodOrderIds.length; i += CHUNK) {
       const chunk = prodOrderIds.slice(i, i + CHUNK);
       const filterParts = chunk.map(id => `_cr7e4_ordernumber_value eq ${id}`);
-      const filter = `(${filterParts.join(' or ')}) and cr7e4_status eq 314870001`;
+      // Use _cr7e4_dispatchitemid_value ne null as the dispatch signal — more reliable than status code
+      const filter = `(${filterParts.join(' or ')}) and _cr7e4_dispatchitemid_value ne null`;
       const url = `${DATAVERSE_URL}/api/data/v9.2/${ENTITY_NAME}`;
       const response = await axios.get(url, {
         headers: {
@@ -701,12 +702,14 @@ app.get('/api/packing-entries/dispatched-by-prod-orders', async (req, res) => {
           Prefer: 'odata.maxpagesize=5000, odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
         },
         params: {
-          $select: 'cr7e4_pcs,cr7e4_bundleweight,_cr7e4_ordernumber_value,_cr7e4_dispatchedto_value',
+          $select: 'cr7e4_pcs,cr7e4_bundleweight,_cr7e4_ordernumber_value,_cr7e4_dispatchedto_value,_cr7e4_dispatchitemid_value,cr7e4_status',
           $filter: filter,
           $top: 5000,
         }
       });
       const records = response.data.value || [];
+      console.log(`[dispatched-by-prod-orders] chunk ${i}-${i+chunk.length}: filter="${filter}" → ${records.length} records`);
+      if (records.length > 0) console.log('[dispatched-by-prod-orders] sample:', JSON.stringify(records[0]));
       for (const rec of records) {
         const prodOrderId = String(rec._cr7e4_ordernumber_value || '').toLowerCase();
         if (!prodOrderId) continue;
