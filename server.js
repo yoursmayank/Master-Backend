@@ -69,8 +69,9 @@ const AGING_HEADER_CLIENT_SECRET = process.env.CLIENT_SECRET_AGINGHEADER || CLIE
 const AGING_LINE_CLIENT_ID = process.env.CLIENT_ID_AGINGLINE || CLIENT_ID;
 const AGING_LINE_CLIENT_SECRET = process.env.CLIENT_SECRET_AGINGLINE || CLIENT_SECRET;
 
-// Your table
-const ENTITY_NAME = 'cr7e4_inventory_records';
+// Reference Data credentials
+const REFDATA_CLIENT_ID = process.env.CLIENT_ID_REFDATA || CLIENT_ID;
+const REFDATA_CLIENT_SECRET = process.env.CLIENT_SECRET_REFDATA || CLIENT_SECRET;
 
 const SCOPE = DATAVERSE_URL + '/.default';
 
@@ -2456,6 +2457,81 @@ app.get('/api/debug-aging-line-columns', async (req, res) => {
     res.json({ totalColumns: Object.keys(record).length, columns: Object.keys(record).sort(), sampleRecord: record });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch aging line columns', details: error.response?.data || error.message });
+  }
+});
+
+/* ===========================
+   REFERENCE DATA (Plant Report)
+=========================== */
+async function getRefDataAccessToken() {
+  const tokenUrl = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`;
+  const params = new URLSearchParams();
+  params.append('grant_type', 'client_credentials');
+  params.append('client_id', REFDATA_CLIENT_ID);
+  params.append('client_secret', REFDATA_CLIENT_SECRET);
+  params.append('scope', SCOPE);
+  const response = await axios.post(tokenUrl, params, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+  });
+  return response.data.access_token;
+}
+
+app.get('/api/reference-data', async (req, res) => {
+  try {
+    const token = await getRefDataAccessToken();
+    const queryParams = {
+      $orderby: 'cr7e4_date asc',
+      $count: 'true',
+    };
+    // Optional date-range filter: ?from=YYYY-MM-DD&to=YYYY-MM-DD
+    const { from, to } = req.query;
+    const filters = [];
+    if (from) filters.push(`cr7e4_date ge ${from}`);
+    if (to)   filters.push(`cr7e4_date le ${to}`);
+    if (filters.length) queryParams.$filter = filters.join(' and ');
+
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/cr7e4_reference_datas`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue", odata.maxpagesize=5000',
+        },
+        params: queryParams,
+      }
+    );
+    res.json({ data: response.data.value, total: response.data['@odata.count'] || 0 });
+  } catch (error) {
+    console.error('[GET /api/reference-data] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch reference data', details: error.response?.data || error.message });
+  }
+});
+
+// DEBUG: discover all columns on cr7e4_reference_datas
+app.get('/api/debug-refdata-columns', async (req, res) => {
+  try {
+    const token = await getRefDataAccessToken();
+    const response = await axios.get(
+      `${DATAVERSE_URL}/api/data/v9.2/cr7e4_reference_datas?$top=1`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
+        },
+      }
+    );
+    const record = response.data.value?.[0];
+    if (!record) return res.json({ message: 'No records found in cr7e4_reference_datas' });
+    res.json({ totalColumns: Object.keys(record).length, columns: Object.keys(record).sort(), sampleRecord: record });
+  } catch (error) {
+    console.error('[DEBUG refdata-columns] Error:', error.response?.data || error.message);
+    res.status(500).json({ error: 'Failed to fetch refdata columns', details: error.response?.data || error.message });
   }
 });
 
